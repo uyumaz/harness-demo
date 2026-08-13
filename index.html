@@ -53,7 +53,10 @@
   /* ---------- Simulation ---------- */
   .sim{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px}
   .sim-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,3fr);gap:20px;align-items:stretch}
-  .stage-wrap{display:flex;flex-direction:column;min-width:0}
+  /* align-self:start keeps this column at its natural height. Stretched, the
+     diagram (flex:1) would absorb any extra row height, so the growing context
+     panel next to it would push the controls down as blocks appear. */
+  .stage-wrap{display:flex;flex-direction:column;min-width:0;align-self:start}
   .diagram{
     position:relative;flex:1;min-height:340px;
     display:grid;gap:14px;align-content:space-between;
@@ -177,6 +180,68 @@
     border-radius:10px;padding:14px 16px;margin:0 0 20px;max-width:46em;font-size:.92rem;
   }
 
+  /* ---------- Deep dive: pseudocode + subsystem cards ---------- */
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px;margin:20px 0 30px}
+  .fact{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--c-harness);
+        border-radius:10px;padding:14px 16px}
+  .fact h3{margin:0 0 6px;font-size:.88rem}
+  .fact p{margin:0;font-size:.87rem;color:var(--muted);max-width:none}
+
+  /* Code column gets the larger share so the annotated lines fit without
+     horizontal scrolling on desktop; it still scrolls itself when narrow. */
+  .dd-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:22px;align-items:start}
+  .dd-grid>*{min-width:0}
+  .dd-grid h3{margin:0 0 6px;font-size:1rem}
+  .dd-hint{font-size:.8rem;color:var(--muted);margin:0 0 10px;max-width:none}
+
+  pre.pseudo{counter-reset:pl;padding:12px 0;font-size:.78rem;line-height:1.75}
+  /* white-space:normal on the wrapper lets the source stay indented — whitespace
+     between the block-level line spans collapses away instead of adding blank rows. */
+  pre.pseudo code{display:block;min-width:max-content;white-space:normal}
+  .pl{display:block;white-space:pre;padding:0 16px 0 12px;border-left:3px solid transparent}
+  .pl::before{
+    counter-increment:pl;content:counter(pl);
+    display:inline-block;width:2em;margin-right:.85em;padding-right:.7em;
+    text-align:right;color:var(--muted);opacity:.55;border-right:1px solid var(--line);
+  }
+  /* Interactive affordances only once JS has added .js to the container, so a
+     no-JS reader is never shown a pointer cursor or hover state that does nothing. */
+  .pl[data-sub]{transition:background-color .18s,border-color .18s}
+  .dd.js .pl[data-sub]{cursor:pointer}
+  .dd.js .pl[data-sub]:hover{background:var(--surface-2)}
+  .js-only{display:none}
+  .dd.js .js-only{display:inline}
+  #pseudo:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .dd-omits{font-size:.8rem;color:var(--muted);margin:10px 0 0;max-width:none}
+  .dd-omits strong{color:var(--text)}
+  .pl.is-lit{background:var(--c-harness-bg);border-left-color:var(--c-harness)}
+  .pl[data-sub]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .sub-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+            margin-bottom:10px;transition:border-color .18s,box-shadow .18s}
+  .sub-card.is-lit{border-color:var(--c-harness);box-shadow:0 0 0 3px var(--c-harness-bg)}
+  /* Flex (not float) so the DOM order is marker, name, badge and a screen
+     reader announces the component name before its line list. The native
+     marker is suppressed and replaced, because display:flex removes it. */
+  .sub-card>summary{cursor:pointer;padding:11px 14px;font-weight:700;font-size:.9rem;
+                    display:flex;align-items:baseline;gap:9px;list-style:none}
+  .sub-card>summary::-webkit-details-marker{display:none}
+  .sub-card>summary::marker{content:""}
+  .sc-marker{color:var(--c-harness);flex:0 0 auto;font-size:.8rem;
+             transition:transform .18s;transform-origin:50% 55%}
+  .sub-card[open]>summary .sc-marker{transform:rotate(90deg)}
+  .sc-name{flex:1 1 auto;min-width:0}
+  .sub-card .sc-lines{flex:0 0 auto;margin-left:auto;font-weight:600;font-size:.7rem;
+                      color:var(--muted);font-variant-numeric:tabular-nums}
+  .sub-card>:not(summary){padding:0 14px;margin:0 0 10px;font-size:.87rem;max-width:none;color:var(--muted)}
+  .sub-card>:last-child:not(summary){padding-bottom:12px}
+  .sub-card .sc-job{color:var(--text)}
+  .sc-fail strong{color:var(--c-harness)}
+  .sub-card .sc-xref{font-size:.78rem}
+
+  @media (max-width:900px){
+    .dd-grid{grid-template-columns:minmax(0,1fr)}
+  }
   @media (max-width:768px){
     .sim-grid{grid-template-columns:1fr}
     /* Harness stays between User and Model — User must never sit directly
@@ -192,6 +257,7 @@
     html{scroll-behavior:auto}
     .ctx-block,.progress-bar>div,.ctx-meter .mbar>div,.actor{transition:none !important}
     #packet{transition:none !important}
+    .pl[data-sub],.sub-card,.sc-marker{transition:none !important}
   }
 </style>
 </head>
@@ -212,7 +278,7 @@
 <section id="simulation" aria-labelledby="sim-h">
   <h2 id="sim-h">One agentic turn, step by step</h2>
   <noscript>
-    <div class="noscript"><strong>JavaScript is turned off.</strong> The simulation below and the written walkthrough that follows it are both rendered with JavaScript, so they will be empty. Everything else on this page — the anatomy of the context window, the anatomy of a tool call, and the glossary — is plain HTML and reads fine without it.</div>
+    <div class="noscript"><strong>JavaScript is turned off.</strong> The simulation below and the written walkthrough that follows it are both rendered with JavaScript, so they will be empty. Everything else on this page reads fine without it — the anatomy of the context window, the anatomy of a tool call, <em>Inside the harness</em> (its pseudocode, all five subsystem cards and their detail), and the glossary are all plain HTML.</div>
   </noscript>
   <p>The user asks <em>"What's in this project?"</em> — a question the model can't answer from memory, so it has to use a tool. Press <strong>Play</strong> to watch the whole turn, or <strong>Step</strong> to advance one move at a time. The panel on the right shows the context window filling up as the turn progresses.</p>
 
@@ -285,7 +351,7 @@
 
 <section id="walkthrough">
   <h2>The same turn, in writing</h2>
-  <p>If you would rather read than watch, here is every step of the turn above, in order. Notice how much of it is the harness doing bookkeeping — and that the model is only involved twice.</p>
+  <p>If you would rather read than watch, here is every step of the turn above, in order. Notice how much of it is the harness doing bookkeeping — and that the model is only involved twice. For the component-level view of the same loop — what each part is called and which one owns which responsibility — see <a href="#deep-dive">Inside the harness</a>.</p>
   <div class="card">
     <ol class="walk" id="walkthrough-list"></ol>
   </div>
@@ -339,17 +405,128 @@
   </div>
 </section>
 
+<section id="deep-dive">
+  <h2>Inside the harness</h2>
+  <p class="lede">Everything above describes the harness from the outside. Underneath, it is an ordinary program &mdash; a loop, a lookup table, a subprocess call and an HTTP client. Here is that program, reduced to its load-bearing parts, and the five components it decomposes into.</p>
+  <p>Three terms recur below, and nothing else here is specialised vocabulary. A <strong><a href="#g-token">token</a></strong> is the unit of text the model is billed and limited by, roughly three-quarters of an English word. The <strong><a href="#g-context-window">context window</a></strong> is the single block of text sent with each request, capped at some maximum number of tokens. The <strong><a href="#g-system-prompt">system prompt</a></strong> is the standing instruction text the harness puts at the front of that block.</p>
+
+  <div class="facts">
+    <div class="fact">
+      <h3>1 &middot; The trust boundary sits at the model API</h3>
+      <p>Everything the model emits &mdash; tool names, arguments, file paths &mdash; is untrusted data until the harness validates it. Treat it exactly as you would treat a request arriving from an anonymous client.</p>
+      <p>The boundary runs both ways, and this is the half that surprises people. Untrusted content also <em>enters</em> through tool results: file contents, command output, web pages, ticket text. Once appended, that text sits in the same context as your instructions, and the model may act on words it finds there &mdash; an instruction hidden in a fetched page can become a tool call. This is <strong>indirect prompt injection</strong>, and it is why the permission check has to be the thing that stops a dangerous action, not the model's judgement about whether to request one.</p>
+    </div>
+    <div class="fact">
+      <h3>2 &middot; Model calls dominate cost and latency, and both scale with context size</h3>
+      <p>Every iteration re-sends the entire context window, and each resend is larger than the last: a request that makes six tool calls costs seven model calls, over a transcript that grows at every step.</p>
+      <p>Providers bill cached input at a fraction of the normal rate, but caching only applies to a stable prefix &mdash; which is why the assembler puts the system prompt and tool definitions first and never edits them. Reordering that prefix silently multiplies the bill. Tool execution is often milliseconds, though unbounded without a timeout; the model call is reliably seconds. Context size is the cost lever.</p>
+    </div>
+    <div class="fact">
+      <h3>3 &middot; Security, observability and spend controls can only live in the harness</h3>
+      <p>The model cannot enforce a permission, emit a metric, or stop at a budget &mdash; it has no side effects at all. Every guardrail, every log line and every limit is something you build on this side of the boundary.</p>
+    </div>
+  </div>
+
+  <div class="dd" id="dd">
+    <div class="dd-grid">
+      <div class="dd-code">
+        <h3>The loop, as code</h3>
+        <p class="dd-hint">Generic pseudocode &mdash; no particular product or SDK.<span class="js-only"> Hover or tap a line to see which component owns it; opening a component highlights its lines.</span></p>
+        <pre class="codeblock pseudo" id="pseudo" tabindex="0" role="group" aria-label="Agentic loop pseudocode, 26 lines, horizontally scrollable"><code>
+          <span class="pl" data-sub="context">context = assemble(systemPrompt, toolDefs, history, userMessage)</span>
+          <span class="pl" data-sub="loop">iterations = 0</span>
+          <span class="pl"></span>
+          <span class="pl" data-sub="loop">while (true) {</span>
+          <span class="pl" data-sub="context">    context = compact(context, BUDGET)    // evict when full</span>
+          <span class="pl" data-sub="api">    reply   = modelApi.send(context)      // one HTTP call</span>
+          <span class="pl" data-sub="context">    context.append(reply)                 // append-only</span>
+          <span class="pl"></span>
+          <span class="pl" data-sub="loop">    // a reply may hold text AND tool calls</span>
+          <span class="pl" data-sub="loop">    if (reply.toolCalls.isEmpty())</span>
+          <span class="pl" data-sub="loop">        return reply.text                 // plain answer: done</span>
+          <span class="pl"></span>
+          <span class="pl" data-sub="loop">    for (call in reply.toolCalls) {</span>
+          <span class="pl" data-sub="executor">        try {</span>
+          <span class="pl" data-sub="registry">            tool = registry.lookup(call.name)  // unknown -&gt; error</span>
+          <span class="pl" data-sub="registry">            args = validate(call.input, tool.schema)</span>
+          <span class="pl" data-sub="executor">            requirePermission(tool, args)      // may ask the user</span>
+          <span class="pl" data-sub="executor">            out  = sandbox.run(tool, args, TIMEOUT)</span>
+          <span class="pl" data-sub="executor">        } catch { out = asError(...) }        // failure is data</span>
+          <span class="pl" data-sub="executor">        out = truncate(out, MAX_OUTPUT)       // cap the output</span>
+          <span class="pl" data-sub="context">        context.append(result(call.id, out))  // untrusted input</span>
+          <span class="pl" data-sub="loop">    }</span>
+          <span class="pl"></span>
+          <span class="pl" data-sub="loop">    if (++iterations &gt;= MAX_ITERATIONS)</span>
+          <span class="pl" data-sub="loop">        return abort("iteration ceiling")     // stop condition</span>
+          <span class="pl" data-sub="loop">}</span>
+        </code></pre>
+        <p class="dd-omits"><strong>What this reduction leaves out:</strong> streaming the reply as it arrives, retries and backoff around the API call, executing independent tool calls in parallel rather than in sequence, the approval interface behind <code>requirePermission</code>, and delegating sub-tasks to nested harnesses. Each is real and each is orthogonal to the control flow shown here.</p>
+      </div>
+
+      <div class="dd-cards">
+        <h3>The five subsystems</h3>
+
+        <details class="sub-card" id="card-context" data-sub="context">
+          <summary><span class="sc-marker" aria-hidden="true">&#9656;</span><span class="sc-name">Context assembler</span><span class="sc-lines">lines 1, 5, 7, 21</span></summary>
+          <p class="sc-job"><strong>Job:</strong> build the block of text that goes into every request &mdash; system prompt, tool definitions, conversation history, newest message &mdash; and decide what to drop when it stops fitting.</p>
+          <p>This is where cost and latency are actually determined, because the block is rebuilt and re-sent on every iteration and its size multiplies across the loop. Keeping the stable parts first (system prompt, then tool definitions) is what lets the provider serve a cached prefix, so the assembler's ordering is a billing decision as much as a formatting one. It is append-only within an iteration, which makes it auditable: the exact bytes sent can be logged verbatim. When the budget is exceeded something must be evicted, and what goes &mdash; oldest messages, largest tool results, or a summary standing in for both &mdash; is a product decision with no correct default.</p>
+          <p class="sc-fail"><strong>Done badly:</strong> sessions that get vaguer the longer they run, because the assembler quietly dropped the instructions that mattered while keeping recent chatter.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-3">step 3</a>, <a href="#walk-5">step 5</a>, <a href="#walk-10">step 10</a>, <a href="#walk-12">step 12</a></p>
+        </details>
+
+        <details class="sub-card" id="card-registry" data-sub="registry">
+          <summary><span class="sc-marker" aria-hidden="true">&#9656;</span><span class="sc-name">Tool registry &amp; validation</span><span class="sc-lines">lines 15–16</span></summary>
+          <p class="sc-job"><strong>Job:</strong> hold the catalogue of callable functions with their argument schemas, and reject anything requested that does not match one.</p>
+          <p>This is the enforcement point for the trust boundary. A name that is not in the registry does not exist, no matter how confidently it was requested, and schema validation here is not a formality &mdash; it is the same input validation you would write for a public HTTP endpoint, because functionally that is what this is. Rejections happen inside the same <code>try</code> as execution, so they come back as ordinary results the model can correct itself from rather than aborting the run.</p>
+          <p class="sc-fail"><strong>Done badly:</strong> a tool invoked with arguments nobody checked, and a stack trace from three layers down surfacing to the user as the assistant's answer.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-7">step 7</a> &mdash; this component owns the validation half of that step.</p>
+        </details>
+
+        <details class="sub-card" id="card-executor" data-sub="executor">
+          <summary><span class="sc-marker" aria-hidden="true">&#9656;</span><span class="sc-name">Executor &amp; sandbox</span><span class="sc-lines">lines 14, 17–20</span></summary>
+          <p class="sc-job"><strong>Job:</strong> actually run the requested tool under a permission check, a time limit and an output cap &mdash; and turn any failure into data.</p>
+          <p>This is the only component with real side effects, so it is where blast radius is decided. It runs with some identity and some filesystem and network reach, and whatever those are is exactly what a mistaken or manipulated call can touch. Timeouts and output caps are containment rather than politeness: an unbounded command holds the loop open indefinitely, and unbounded output consumes the very budget the assembler is trying to manage. Note what the <code>try</code> encloses &mdash; lookup, validation and permission failures are captured on the same path as a crashing command, so none of them can end the run.</p>
+          <p class="sc-fail"><strong>Done badly:</strong> a typo'd deletion running with the service's own privileges &mdash; or one verbose command whose output fills the context window and derails everything after it.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-7">step 7</a>, <a href="#walk-8">step 8</a>, <a href="#walk-9">step 9</a> &mdash; this component owns the permission half of step 7.</p>
+        </details>
+
+        <details class="sub-card" id="card-api" data-sub="api">
+          <summary><span class="sc-marker" aria-hidden="true">&#9656;</span><span class="sc-name">Model API client</span><span class="sc-lines">line 6</span></summary>
+          <p class="sc-job"><strong>Job:</strong> make the HTTP request to the model service and hand back a parsed reply.</p>
+          <p>One line in the loop, and almost all of the wall-clock time and nearly all of the bill. It is a network call to a third party, so it inherits every concern you would apply to any external dependency: timeouts, retries with backoff, rate-limit handling, and a circuit breaker for when the service degrades. It is also the natural instrumentation point &mdash; request size, response size, latency and cost per call all pass through here, and if you do not measure them here you will not measure them at all.</p>
+          <p class="sc-fail"><strong>Done badly:</strong> a run that hangs forever because one upstream request had no timeout, or a bill nobody can attribute because per-call sizes were never recorded.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-4">step 4</a>, <a href="#walk-6">step 6</a>, <a href="#walk-11">step 11</a>, <a href="#walk-13">step 13</a></p>
+        </details>
+
+        <details class="sub-card" id="card-loop" data-sub="loop">
+          <summary><span class="sc-marker" aria-hidden="true">&#9656;</span><span class="sc-name">Loop controller</span><span class="sc-lines">lines 2, 4, 9–11, 13, 22, 24–26</span></summary>
+          <p class="sc-job"><strong>Job:</strong> decide whether to go round again, and guarantee that the loop always ends.</p>
+          <p>The only natural exit is a reply containing no tool call, and that is a decision made by a non-deterministic remote service &mdash; which means it is not a guarantee. Every other stop condition is one you impose: an iteration ceiling, a token budget, a wall-clock deadline, a repeated-call detector. This component owns the state machine for the whole request, so cancellation and resumption belong here too. Treat &ldquo;the model will stop on its own&rdquo; as a happy path, not as a design.</p>
+          <p class="sc-fail"><strong>Done badly:</strong> an agent that loops on the same failing command until somebody notices the spend graph.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-11">step 11</a>, <a href="#walk-12">step 12</a>, <a href="#walk-13">step 13</a></p>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="glossary">
   <h2>Glossary</h2>
   <div class="card">
     <dl class="gloss">
       <dt>Harness</dt><dd>The software around the model: it builds the context, calls the model API, executes tool calls, enforces permissions, and loops until the turn is done. Also called an agent framework or scaffold.</dd>
       <dt>Model (LLM)</dt><dd>A large language model behind an API. Text in, text out — and nothing else: no memory of earlier calls, no side effects, no hands, no network. Its output is <em>sampled</em> rather than computed, so the same input can come back worded differently each time.</dd>
-      <dt>Token</dt><dd>The unit models read and write — roughly ¾ of an English word. Context limits, costs, and speed are all measured in tokens.</dd>
-      <dt>Context window</dt><dd>The complete stack of text the model sees on one call: system prompt, tool definitions, and conversation so far. Capped at a hard token limit.</dd>
-      <dt>System prompt</dt><dd>Instructions the harness places first in the context: role, rules, style, environment details. The user usually never sees it.</dd>
+      <dt id="g-token">Token</dt><dd>The unit models read and write — roughly ¾ of an English word. Context limits, costs, and speed are all measured in tokens.</dd>
+      <dt id="g-context-window">Context window</dt><dd>The complete stack of text the model sees on one call: system prompt, tool definitions, and conversation so far. Capped at a hard token limit.</dd>
+      <dt id="g-system-prompt">System prompt</dt><dd>Instructions the harness places first in the context: role, rules, style, environment details. The user usually never sees it.</dd>
       <dt>Tool call</dt><dd>A structured request the model writes (a name plus JSON arguments) asking the harness to do something in the real world.</dd>
       <dt>Agentic loop</dt><dd>The cycle the harness runs: call model → if it requested a tool, execute it, append the result, call again → repeat until the model answers in plain text.</dd>
+      <dt id="g-sandbox">Sandbox</dt><dd>The restricted environment a tool runs in — limited filesystem reach, network access, privileges and time. It is what decides how much damage a mistaken or manipulated tool call can do.</dd>
+      <dt id="g-blast-radius">Blast radius</dt><dd>How far the damage spreads when something goes wrong. For a harness it is set by the executor's identity and permissions, not by anything the model does.</dd>
+      <dt id="g-compaction">Compaction (eviction)</dt><dd>Dropping or summarising older parts of the context window once it no longer fits the token limit. Eviction is the discarding; compaction usually means replacing a long stretch with a shorter summary of it.</dd>
+      <dt id="g-circuit-breaker">Circuit breaker</dt><dd>A standard resilience pattern: after repeated failures from a dependency, stop calling it for a while instead of retrying into a wall. Applied here to the model API client.</dd>
+      <dt id="g-iteration-ceiling">Iteration ceiling</dt><dd>A hard cap on how many times the loop may go round for a single user request, imposed by the harness so the run always terminates even if the model never stops asking for tools.</dd>
+      <dt id="g-injection">Indirect prompt injection</dt><dd>Instructions planted in content the model reads through a tool result — a file, a web page, a ticket — which the model may then act on as if you had written them.</dd>
     </dl>
     <h3>Common misconceptions</h3>
     <ul class="myths">
@@ -419,6 +596,9 @@
      caption:"That’s the whole trick — repeated. Complex agent sessions are just this loop running many times: more tool calls, more results, an ever-growing context. Press <strong>Reset</strong> to run it again."}
   ];
   var LAST = STAGES.length - 1;        // index of the "Done" frame
+  // Shown when the user steps past the end. Shared so the caption-height probe
+  // below measures exactly the string stepOnce() writes.
+  var DONE_CAPTION = "The turn is complete — press <strong>Reset</strong> (or Play) to run it again.";
   var STEP_COUNT = LAST - 1;           // 14 labelled steps; "Done" is not one of them
 
   /* ---------- Elements ---------- */
@@ -603,7 +783,7 @@
   /* ---------- Controls ---------- */
   function stepOnce(){
     if (current >= LAST){
-      els.caption.innerHTML = "The turn is complete — press <strong>Reset</strong> (or Play) to run it again.";
+      els.caption.innerHTML = DONE_CAPTION;
       return;
     }
     applyStage(current + 1, true);
@@ -684,6 +864,7 @@
   STAGES.forEach(function(st, i){
     if (i === 0 || i === LAST) return;          // "Ready" and "Done" are framing, not steps
     var li = document.createElement("li");
+    li.id = "walk-" + i;          // anchor target for the deep-dive cross-references
     var label = document.createElement("div");
     label.className = "wl";
     label.textContent = st.label.replace(/^Step \d+ · /, "");
@@ -695,10 +876,297 @@
     els.walkthrough.appendChild(li);
   });
 
+  /* ---------- Caption box height lock ----------
+     Captions differ in length, so the box's height changes per step and every
+     control below it shifts. A CSS min-height cannot know the right value: it
+     depends on how the text wraps at the current width. So measure — render
+     every caption into an off-screen clone at the live width, take the tallest,
+     and pin the real box to it. Recomputed on resize.
+     Side benefit: the diagram (flex:1 above the box) stops reflowing per step. */
+
+  var lastPinned = null;
+
+  function sizeCaptionBox(){
+    var box = document.querySelector(".caption-box");
+    if (!box) return;
+    var width = box.getBoundingClientRect().width;
+    if (!width) return;
+
+    var probe = box.cloneNode(true);
+    if (probe.hasAttribute("id")) probe.removeAttribute("id");
+    Array.prototype.forEach.call(probe.querySelectorAll("[id]"), function(e){
+      e.removeAttribute("id");
+    });
+    probe.removeAttribute("aria-live");
+    probe.removeAttribute("aria-atomic");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;" +
+                          "pointer-events:none;min-height:0;width:" + width + "px";
+
+    var pLabel = probe.querySelector(".stage-label");
+    var pText  = probe.querySelector("p");
+    if (!pLabel || !pText) return;          // markup changed; leave the CSS floor alone
+
+    var max = 0, i;
+    // try/finally so a throw mid-measurement can never orphan the probe in the DOM.
+    try {
+      box.parentNode.appendChild(probe);
+      for (i = 0; i < STAGES.length; i++){
+        pLabel.textContent = STAGES[i].label;
+        pText.innerHTML = fillTokens(STAGES[i].caption, i);
+        if (probe.getBoundingClientRect().height > max) max = probe.getBoundingClientRect().height;
+      }
+      pLabel.textContent = STAGES[LAST].label;
+      pText.innerHTML = DONE_CAPTION;
+      if (probe.getBoundingClientRect().height > max) max = probe.getBoundingClientRect().height;
+    } finally {
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
+    }
+
+    // getBoundingClientRect is sub-pixel; offsetHeight would round down and let one
+    // caption push the box 1px taller. Ceil so the pin is never short.
+    var pinned = Math.ceil(max);
+    // Only write when the value actually changes: this is what stops the
+    // ResizeObserver below from re-triggering itself on its own mutation.
+    if (pinned !== lastPinned){
+      lastPinned = pinned;
+      box.style.minHeight = pinned + "px";
+    }
+  }
+
+  var capTimer = null;
+  function scheduleCaptionSizing(){
+    clearTimeout(capTimer);
+    capTimer = setTimeout(sizeCaptionBox, 120);
+  }
+  window.addEventListener("resize", scheduleCaptionSizing);
+  // The caption box can change width without the window resizing (layout shifts,
+  // zoom, a container query elsewhere), so observe the column directly too.
+  if (window.ResizeObserver){
+    var capRo = new ResizeObserver(scheduleCaptionSizing);
+    var wrap = document.querySelector(".stage-wrap");
+    if (wrap) capRo.observe(wrap);
+    var capBox = document.querySelector(".caption-box");
+    if (capBox) capRo.observe(capBox);
+  }
+
   /* ---------- Init ---------- */
   els.maxline.textContent = "token limit — e.g. " + shortTokens(WINDOW_MAX);
+  sizeCaptionBox();
   drawWires();
   applyStage(0, false);
+})();
+</script>
+
+<script>
+/* ---------------------------------------------------------------------------
+   Deep-dive layer: links pseudocode lines to subsystem cards, both directions.
+   Isolated from the simulation IIFE above — it shares no state with it.
+   Progressive enhancement: the markup is plain text and native <details>, and
+   everything here only *adds* behaviour, so with JavaScript off the section
+   still reads completely and shows no controls or false affordances.
+
+   Highlight state is derived, never stored: the lit set is the union of every
+   OPEN card's subsystem plus one transient hovered subsystem. That is what lets
+   two cards stay lit at once, and what makes closing one card leave the other
+   card's lines lit.
+--------------------------------------------------------------------------- */
+(function(){
+  "use strict";
+
+  var section = document.getElementById("deep-dive");
+  var root    = document.getElementById("dd");
+  var pseudo  = document.getElementById("pseudo");
+  if (!section || !root || !pseudo) return;
+
+  var allLines = Array.prototype.slice.call(pseudo.querySelectorAll(".pl"));
+  var lines    = allLines.filter(function(l){ return l.hasAttribute("data-sub"); });
+  var cards    = Array.prototype.slice.call(root.querySelectorAll(".sub-card"));
+  if (!lines.length || !cards.length) return;
+
+  var cardBySub = {};
+  cards.forEach(function(c){ cardBySub[c.getAttribute("data-sub")] = c; });
+
+  var motion  = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var hovered = null;     // transient; the durable pin lives in each card's open state
+  var active  = 0;        // roving-tabindex position
+
+  // Focusing a line highlights its component — but only when focus came from the
+  // keyboard. A tap also focuses, and touch never sends a matching leave event,
+  // so without this the highlight would stick on after tapping a card closed.
+  var pointerFocus = false;
+  document.addEventListener("pointerdown", function(){ pointerFocus = true; }, true);
+  document.addEventListener("keydown", function(){ pointerFocus = false; }, true);
+
+  /* ---------- line badges, regenerated from the DOM so they cannot drift ---- */
+  function formatLines(nums){
+    var out = [], i = 0;
+    while (i < nums.length){
+      var j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      out.push(j === i ? String(nums[i]) : nums[i] + "–" + nums[j]);
+      i = j + 1;
+    }
+    return (nums.length === 1 ? "line " : "lines ") + out.join(", ");
+  }
+  cards.forEach(function(c){
+    var sub = c.getAttribute("data-sub"), nums = [];
+    allLines.forEach(function(l, idx){
+      if (l.getAttribute("data-sub") === sub) nums.push(idx + 1);
+    });
+    var badge = c.querySelector(".sc-lines");
+    if (badge && nums.length) badge.textContent = formatLines(nums);
+  });
+
+  /* ---------- derived highlight -------------------------------------------- */
+  function openSubs(){
+    var subs = {};
+    cards.forEach(function(c){ if (c.open) subs[c.getAttribute("data-sub")] = 1; });
+    return subs;
+  }
+
+  function render(){
+    var pinned = openSubs();
+    var lit = {};
+    Object.keys(pinned).forEach(function(s){ lit[s] = 1; });
+    if (hovered) lit[hovered] = 1;
+
+    Array.prototype.forEach.call(root.querySelectorAll(".is-lit"), function(el){
+      el.classList.remove("is-lit");
+    });
+    Object.keys(lit).forEach(function(sub){
+      Array.prototype.forEach.call(root.querySelectorAll('[data-sub="' + sub + '"]'), function(el){
+        el.classList.add("is-lit");
+      });
+    });
+    // aria-pressed reflects the durable pin (card open), not the transient hover.
+    lines.forEach(function(l){
+      l.setAttribute("aria-pressed", pinned[l.getAttribute("data-sub")] ? "true" : "false");
+    });
+  }
+
+  function setHover(sub){
+    if (sub === hovered) return;
+    hovered = sub;
+    render();
+  }
+
+  function ensureVisible(el){
+    var r = el.getBoundingClientRect();
+    var h = window.innerHeight || document.documentElement.clientHeight;
+    if (r.top >= 0 && r.bottom <= h) return;           // already fully on screen
+    if (!el.scrollIntoView) return;
+    try {
+      el.scrollIntoView({ block: "nearest", behavior: motion.matches ? "auto" : "smooth" });
+    } catch (e) {
+      el.scrollIntoView();                             // older single-argument form
+    }
+  }
+
+  // Clicking a line pins its component: opens the card, brings it on screen, and
+  // lights every line that component owns. Clicking again unpins and closes it.
+  function toggleSub(sub){
+    var card = cardBySub[sub];
+    if (!card) return;
+    var opening = !card.open;
+    card.open = opening;
+    render();                    // the toggle event is async; do not wait for it
+    if (opening) ensureVisible(card);
+  }
+
+  /* ---------- lines --------------------------------------------------------- */
+  function setRoving(i){
+    active = Math.max(0, Math.min(lines.length - 1, i));
+    lines.forEach(function(l, n){ l.tabIndex = (n === active) ? 0 : -1; });
+  }
+
+  lines.forEach(function(l, i){
+    var sub = l.getAttribute("data-sub");
+    l.setAttribute("role", "button");
+    l.setAttribute("aria-pressed", "false");
+    if (cardBySub[sub]) l.setAttribute("aria-describedby", "card-" + sub);
+    l.tabIndex = (i === 0) ? 0 : -1;
+    l.addEventListener("focus", function(){
+      setRoving(i);
+      if (!pointerFocus) setHover(sub);      // keyboard focus only
+    });
+    l.addEventListener("blur", function(){ setHover(null); });
+    l.addEventListener("click", function(){ setRoving(i); toggleSub(sub); });
+  });
+
+  // Delegated hover: moving onto a blank or unannotated line resolves to null and
+  // clears the transient highlight, which per-line mouseenter could never do.
+  //
+  // Pointer events, not mouse events, and touch is ignored outright: a tap emits
+  // a compatibility mouseover but never a matching mouseleave, so a touch user
+  // would be left with a hover highlight stuck on permanently — visible as lines
+  // that stay lit after tapping a card closed.
+  function hoverTarget(e){
+    var el = e.target;
+    while (el && el !== pseudo){
+      if (el.classList && el.classList.contains("pl")){
+        return el.hasAttribute("data-sub") ? el.getAttribute("data-sub") : null;
+      }
+      el = el.parentNode;
+    }
+    return null;
+  }
+  pseudo.addEventListener("pointerover", function(e){
+    if (e.pointerType === "touch") return;
+    setHover(hoverTarget(e));
+  });
+  pseudo.addEventListener("pointerleave", function(e){
+    if (e.pointerType === "touch") return;
+    setHover(null);
+  });
+
+  pseudo.addEventListener("keydown", function(e){
+    var i = lines.indexOf(document.activeElement);
+    if (i === -1) return;                     // the scroll container itself has focus
+    var next = null;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") next = i + 1;
+    else if (e.key === "ArrowUp" || e.key === "ArrowLeft") next = i - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = lines.length - 1;
+    else if (e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      toggleSub(lines[i].getAttribute("data-sub"));
+      return;
+    }
+    if (next === null) return;
+    e.preventDefault();
+    setRoving(next);
+    lines[active].focus();
+  });
+
+  /* ---------- cards --------------------------------------------------------- */
+  cards.forEach(function(c){
+    var sub = c.getAttribute("data-sub");
+    c.addEventListener("pointerenter", function(e){
+      if (e.pointerType !== "touch") setHover(sub);
+    });
+    c.addEventListener("pointerleave", function(e){
+      if (e.pointerType !== "touch") setHover(null);
+    });
+    c.addEventListener("focusin", function(){
+      if (!pointerFocus) setHover(sub);      // keyboard focus only
+    });
+    c.addEventListener("focusout", function(){ setHover(null); });
+    c.addEventListener("toggle", render);     // covers plain summary clicks
+  });
+
+  /* ---------- isolation from the simulation's global shortcuts --------------- */
+  // The player binds Space / R / arrows on `document`. Stop those keys at this
+  // section's boundary, in the bubble phase so our own handlers have already run.
+  // stopPropagation only, never preventDefault, so native <details> and button
+  // activation keep working.
+  var SIM_KEYS = { " ": 1, "r": 1, "R": 1, "ArrowRight": 1, "ArrowLeft": 1 };
+  section.addEventListener("keydown", function(e){
+    if (SIM_KEYS[e.key] === 1) e.stopPropagation();
+  });
+
+  root.classList.add("js");      // unlocks the pointer/hover affordances in CSS
+  render();
 })();
 </script>
 </body>
