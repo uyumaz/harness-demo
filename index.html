@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A visual, step-by-step explainer of what an AI harness does: assembling the context window, calling the model, executing tool calls, and looping until the turn is done.">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1420" media="(prefers-color-scheme: dark)">
+<title>How AI Harnesses Work</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef0f4; --text:#1c2330; --muted:#5b6474;
+    --line:#d8dde6; --accent:#2563eb;
+    --c-user:#2563eb; --c-user-bg:#e4edfd;
+    --c-harness:#b45309; --c-harness-bg:#fdeeda;
+    --c-model:#7c3aed; --c-model-bg:#f0e8fd;
+    --c-tools:#047857; --c-tools-bg:#dcf5ec;
+    --code-bg:#f0f2f6; --shadow:0 1px 3px rgba(16,24,40,.08),0 4px 14px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1420; --surface:#171e2e; --surface-2:#1f2839; --text:#e7ebf2; --muted:#9aa4b5;
+      --line:#2c3750; --accent:#6ea0ff;
+      --c-user:#7fa9ff; --c-user-bg:#1d2b4a;
+      --c-harness:#f0a860; --c-harness-bg:#3a2a16;
+      --c-model:#bda1f7; --c-model-bg:#2e2348;
+      --c-tools:#5ed3ab; --c-tools-bg:#123529;
+      --code-bg:#111827; --shadow:0 1px 3px rgba(0,0,0,.5);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  main,header.site,footer.site{max-width:1080px;margin:0 auto;padding:0 20px}
+  header.site{padding-top:56px;padding-bottom:8px;text-align:center}
+  header.site h1{font-size:clamp(1.8rem,4.5vw,2.6rem);line-height:1.15;margin:0 0 10px}
+  header.site .hook{color:var(--muted);font-size:1.1rem;max-width:46em;margin:0 auto}
+  section{margin:56px 0}
+  h2{font-size:1.5rem;margin:0 0 12px}
+  h3{font-size:1.1rem;margin:24px 0 8px}
+  p{max-width:46em}
+  .lede{font-size:1.05rem}
+  .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:.8rem;font-weight:600;vertical-align:1px}
+  .pill.user{color:var(--c-user);background:var(--c-user-bg)}
+  .pill.harness{color:var(--c-harness);background:var(--c-harness-bg)}
+  .pill.model{color:var(--c-model);background:var(--c-model-bg)}
+  .pill.tools{color:var(--c-tools);background:var(--c-tools-bg)}
+
+  /* ---------- Simulation ---------- */
+  .sim{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px}
+  .sim-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,3fr);gap:20px;align-items:stretch}
+  .stage-wrap{display:flex;flex-direction:column;min-width:0}
+  .diagram{
+    position:relative;flex:1;min-height:340px;
+    display:grid;gap:14px;align-content:space-between;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-areas:"user harness model" ". tools .";
+    /* overflow:hidden keeps a long packet label from widening the page; the 6/8px
+       padding leaves room for the 4px highlight ring so it is not clipped. */
+    padding:10px 6px 8px;overflow:hidden;
+  }
+  .wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .wires line{stroke:var(--line);stroke-width:2;stroke-dasharray:5 6}
+  .actor{
+    position:relative;z-index:1;background:var(--surface);border:2px solid var(--line);border-radius:12px;
+    padding:12px 10px;text-align:center;align-self:center;transition:border-color .25s, box-shadow .25s;
+  }
+  .actor .icon{font-size:1.6rem;line-height:1}
+  .actor .name{font-weight:700;font-size:.95rem;margin-top:4px}
+  .actor .sub{font-size:.75rem;color:var(--muted);line-height:1.3;margin-top:2px}
+  #actor-user{grid-area:user}   #actor-harness{grid-area:harness}
+  #actor-model{grid-area:model} #actor-tools{grid-area:tools}
+  .actor.hl-user{border-color:var(--c-user);box-shadow:0 0 0 4px var(--c-user-bg)}
+  .actor.hl-harness{border-color:var(--c-harness);box-shadow:0 0 0 4px var(--c-harness-bg)}
+  .actor.hl-model{border-color:var(--c-model);box-shadow:0 0 0 4px var(--c-model-bg)}
+  .actor.hl-tools{border-color:var(--c-tools);box-shadow:0 0 0 4px var(--c-tools-bg)}
+  #packet{
+    position:absolute;z-index:2;top:0;left:0;transform:translate(-200px,-200px);
+    background:var(--text);color:var(--bg);font-size:.75rem;font-weight:600;
+    padding:4px 10px;border-radius:99px;white-space:nowrap;opacity:0;pointer-events:none;
+    max-width:calc(100% - 12px);overflow:hidden;text-overflow:ellipsis;
+  }
+  #packet.visible{opacity:1}
+
+  .caption-box{
+    margin-top:14px;background:var(--surface-2);border-radius:10px;padding:14px 16px;min-height:5.4em;
+  }
+  .caption-box .stage-label{font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .caption-box p{margin:4px 0 0;max-width:none}
+
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  .controls button{
+    font:inherit;font-weight:600;color:var(--text);background:var(--surface);
+    border:1px solid var(--line);border-radius:8px;padding:8px 16px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .controls button:hover{border-color:var(--accent)}
+  .controls button:focus-visible,.controls select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .controls button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .controls select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px}
+  .controls .spacer{flex:1}
+  .progress{font-variant-numeric:tabular-nums;font-size:.85rem;color:var(--muted)}
+  .progress-bar{height:4px;background:var(--surface-2);border-radius:99px;margin-top:10px;overflow:hidden}
+  .progress-bar>div{height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .3s}
+  kbd{background:var(--surface-2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;font-size:.8rem}
+  .kbd-hint{font-size:.8rem;color:var(--muted);margin-top:10px}
+
+  /* Context window panel */
+  .ctx-panel{background:var(--surface-2);border-radius:12px;padding:14px;display:flex;flex-direction:column;min-width:0}
+  .ctx-panel h3{margin:0 0 2px;font-size:.95rem}
+  .ctx-panel .ctx-sub{font-size:.75rem;color:var(--muted);margin-bottom:10px}
+  .ctx-stack{flex:1;display:flex;flex-direction:column;gap:6px;justify-content:flex-end;min-height:220px}
+  .ctx-block{
+    border-left:4px solid var(--line);border-radius:6px;padding:6px 9px;background:var(--surface);
+    opacity:0;transform:translateY(8px);transition:opacity .35s,transform .35s;
+  }
+  .ctx-block.in{opacity:1;transform:none}
+  .ctx-block .bl{font-size:.78rem;font-weight:700}
+  .ctx-block .bd{font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ctx-block .bt{font-size:.68rem;color:var(--muted);float:right;font-variant-numeric:tabular-nums}
+  .ctx-block.b-sys{border-left-color:var(--c-harness)}
+  .ctx-block.b-tools{border-left-color:var(--c-tools)}
+  .ctx-block.b-user{border-left-color:var(--c-user)}
+  .ctx-block.b-call{border-left-color:var(--c-model)}
+  .ctx-block.b-result{border-left-color:var(--c-tools)}
+  .ctx-block.b-ans{border-left-color:var(--c-model)}
+  .ctx-meter{margin-top:12px}
+  .ctx-meter .mlabel{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ctx-meter .mbar{height:8px;background:var(--surface);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:4px}
+  .ctx-meter .mbar>div{height:100%;width:0;min-width:0;background:var(--c-harness);transition:width .35s}
+  .ctx-meter .mnote{font-size:.68rem;color:var(--muted);margin-top:4px}
+
+  /* ---------- Static sections ---------- */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 24px}
+  /* minmax(0,1fr) so a long unbreakable line inside .codeblock scrolls itself
+     instead of forcing the whole grid (and the page) wider than the viewport. */
+  .anatomy-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+  .stack-demo{display:flex;flex-direction:column;gap:8px}
+  .stack-demo .ctx-block{opacity:1;transform:none}
+  .maxline{border-top:2px dashed var(--muted);color:var(--muted);font-size:.72rem;padding-top:2px;text-align:right}
+  pre.codeblock{
+    background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;font-size:.82rem;line-height:1.55;overflow-x:auto;margin:0;
+  }
+  .annot{font-size:.85rem;color:var(--muted);margin-top:10px}
+  .annot strong{color:var(--text)}
+  dl.gloss{display:grid;grid-template-columns:max-content 1fr;gap:10px 20px;margin:0}
+  dl.gloss dt{font-weight:700}
+  dl.gloss dd{margin:0;color:var(--muted)}
+  ol.walk{margin:0;padding-left:0;list-style:none;counter-reset:walk;max-width:52em}
+  ol.walk li{counter-increment:walk;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;padding:12px 0;border-top:1px solid var(--line)}
+  ol.walk li:first-child{border-top:0;padding-top:0}
+  ol.walk li::before{
+    content:counter(walk);grid-row:1/span 2;align-self:start;
+    width:26px;height:26px;border-radius:50%;background:var(--surface-2);color:var(--muted);
+    font-size:.78rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+  }
+  ol.walk .wl{font-weight:700;font-size:.92rem}
+  ol.walk .wc{color:var(--muted);font-size:.92rem}
+  ol.walk .wc code{background:var(--code-bg);border-radius:4px;padding:0 4px;font-size:.85em}
+  ul.myths{padding-left:0;list-style:none;max-width:46em}
+  ul.myths li{margin:14px 0}
+  ul.myths .myth{font-weight:700}
+  ul.myths .truth{color:var(--muted)}
+  footer.site{padding:40px 20px 56px;color:var(--muted);font-size:.85rem;text-align:center}
+
+  .sr-only{
+    position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+    overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+  }
+  .noscript{
+    border:1px solid var(--c-harness);background:var(--c-harness-bg);
+    border-radius:10px;padding:14px 16px;margin:0 0 20px;max-width:46em;font-size:.92rem;
+  }
+
+  @media (max-width:768px){
+    .sim-grid{grid-template-columns:1fr}
+    /* Harness stays between User and Model — User must never sit directly
+       beside Model, which would contradict "never straight to the model". */
+    .diagram{min-height:300px;grid-template-columns:1fr 1fr;grid-template-areas:"user harness" "tools model"}
+    .anatomy-grid{grid-template-columns:minmax(0,1fr)}
+    dl.gloss{grid-template-columns:1fr;gap:2px}
+    dl.gloss dd{margin-bottom:12px}
+    /* Room to wrap here, so show the block detail in full instead of clipping it. */
+    .ctx-block .bd{white-space:normal;overflow:visible;text-overflow:clip}
+  }
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    .ctx-block,.progress-bar>div,.ctx-meter .mbar>div,.actor{transition:none !important}
+    #packet{transition:none !important}
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <h1>How AI Harnesses Work</h1>
+  <p class="hook">The model writes the words. Everything else — building the prompt, running the tools, looping until the job is done — is the <em>harness</em>. Watch one turn happen, piece by piece.</p>
+</header>
+
+<main>
+
+<section id="intro">
+  <p class="lede">When you chat with an AI coding agent or assistant, you're never talking to a language model directly. You're talking to a <strong>harness</strong>: the software wrapped around the model. The harness assembles everything the model sees, executes everything the model asks for, and repeats that loop until your request is finished. The model is the brain; the harness is the hands.</p>
+  <p>Four players are involved in every turn: the <span class="pill user">User</span> who asks, the <span class="pill harness">Harness</span> that orchestrates, the <span class="pill model">Model&nbsp;API</span> that reads and writes text, and the <span class="pill tools">Tools&nbsp;&amp;&nbsp;Environment</span> — files, shells, and services the harness can operate on the model's behalf.</p>
+</section>
+
+<section id="simulation" aria-labelledby="sim-h">
+  <h2 id="sim-h">One agentic turn, step by step</h2>
+  <noscript>
+    <div class="noscript"><strong>JavaScript is turned off.</strong> The simulation below and the written walkthrough that follows it are both rendered with JavaScript, so they will be empty. Everything else on this page — the anatomy of the context window, the anatomy of a tool call, and the glossary — is plain HTML and reads fine without it.</div>
+  </noscript>
+  <p>The user asks <em>"What's in this project?"</em> — a question the model can't answer from memory, so it has to use a tool. Press <strong>Play</strong> to watch the whole turn, or <strong>Step</strong> to advance one move at a time. The panel on the right shows the context window filling up as the turn progresses.</p>
+
+  <div class="sim">
+    <div class="sim-grid">
+      <div class="stage-wrap">
+        <div class="diagram" id="diagram">
+          <svg class="wires" id="wires" aria-hidden="true"></svg>
+          <div class="actor" id="actor-user">
+            <div class="icon" aria-hidden="true">🧑‍💻</div>
+            <div class="name">User</div>
+            <div class="sub">asks questions,<br>reads answers</div>
+          </div>
+          <div class="actor" id="actor-harness">
+            <div class="icon" aria-hidden="true">🎛️</div>
+            <div class="name">Harness</div>
+            <div class="sub">assembles context,<br>executes tools, loops</div>
+          </div>
+          <div class="actor" id="actor-model">
+            <div class="icon" aria-hidden="true">🧠</div>
+            <div class="name">Model API</div>
+            <div class="sub">reads text in,<br>writes text out</div>
+          </div>
+          <div class="actor" id="actor-tools">
+            <div class="icon" aria-hidden="true">🗂️</div>
+            <div class="name">Tools &amp; Environment</div>
+            <div class="sub">files, shell,<br>services</div>
+          </div>
+          <div id="packet" aria-hidden="true"></div>
+        </div>
+        <div class="caption-box" aria-live="polite" aria-atomic="true">
+          <div class="stage-label" id="stage-label">Ready</div>
+          <p id="caption">Press <strong>Play</strong> to watch one full agentic turn, or <strong>Step</strong> to move through it at your own pace.</p>
+        </div>
+        <div class="controls">
+          <!-- Glyphs are aria-hidden so each button's accessible name is exactly its
+               visible word ("Play"/"Pause", "Step", "Reset") — WCAG 2.5.3. -->
+          <button id="btn-play" class="primary"><span class="btn-icon" aria-hidden="true">▶</span><span class="btn-word">Play</span></button>
+          <button id="btn-step"><span class="btn-word">Step</span><span class="btn-icon" aria-hidden="true">›</span></button>
+          <button id="btn-reset"><span class="btn-icon" aria-hidden="true">↺</span><span class="btn-word">Reset</span></button>
+          <span class="spacer"></span>
+          <label for="speed" class="progress">Speed</label>
+          <select id="speed">
+            <option value="0.6">Slow</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.8">Fast</option>
+          </select>
+          <span class="progress" id="progress-text">Step 0 of 14</span>
+        </div>
+        <div class="progress-bar" aria-hidden="true"><div id="progress-fill"></div></div>
+        <p class="kbd-hint"><kbd>Space</kbd> play/pause · <kbd>→</kbd> step · <kbd>R</kbd> reset</p>
+      </div>
+
+      <aside class="ctx-panel" aria-label="Context window contents">
+        <h3>Context window</h3>
+        <div class="ctx-sub">everything the model sees on its next call</div>
+        <div class="ctx-stack" id="ctx-stack"></div>
+        <!-- Screen readers get a spoken summary whenever the stack changes; the
+             visible blocks and bar carry the same information sighted. -->
+        <p class="sr-only" id="ctx-summary" aria-live="polite" aria-atomic="true"></p>
+        <div class="ctx-meter">
+          <div class="mlabel"><span>used</span><span id="token-count">0 tokens</span></div>
+          <div class="mbar"><div id="token-fill"></div></div>
+          <div class="mnote" id="token-note"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section id="walkthrough">
+  <h2>The same turn, in writing</h2>
+  <p>If you would rather read than watch, here is every step of the turn above, in order. Notice how much of it is the harness doing bookkeeping — and that the model is only involved twice.</p>
+  <div class="card">
+    <ol class="walk" id="walkthrough-list"></ol>
+  </div>
+</section>
+
+<section id="context-anatomy">
+  <h2>Anatomy of the context window</h2>
+  <div class="card">
+    <div class="anatomy-grid">
+      <div>
+        <p>A language model is <strong>stateless</strong>: it remembers nothing between calls. So on every single call, the harness rebuilds the model's entire world from scratch — one long stack of text called the <strong>context window</strong>. "Memory" in a chat is an illusion the harness maintains by replaying the whole conversation every time.</p>
+        <p>The stack is append-only during a turn. Each tool call, each result, each answer gets added to the bottom, and the whole thing is re-sent on the next call. That's why long sessions get slower and more expensive, and why every harness eventually has to summarize or trim old history: the window has a hard token limit.</p>
+      </div>
+      <div class="stack-demo" aria-label="Diagram of a context window">
+        <div class="ctx-block b-sys"><span class="bt">fixed</span><div class="bl">System prompt</div><div class="bd">who the assistant is, rules, style</div></div>
+        <div class="ctx-block b-tools"><span class="bt">fixed</span><div class="bl">Tool definitions</div><div class="bd">every tool's name, purpose, parameters</div></div>
+        <div class="ctx-block b-user"><span class="bt">grows</span><div class="bl">Conversation history</div><div class="bd">user messages, answers, tool calls &amp; results</div></div>
+        <div class="ctx-block b-user"><span class="bt">newest</span><div class="bl">Latest user message</div><div class="bd">what the model responds to right now</div></div>
+        <div class="maxline" id="maxline">token limit</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tool-anatomy">
+  <h2>Anatomy of a tool call</h2>
+  <div class="card">
+    <div class="anatomy-grid">
+      <div>
+        <pre class="codeblock"><code>// The model's entire output — just structured text:
+{
+  "type": "tool_use",
+  "name": "list_files",
+  "input": { "path": "." }
+}</code></pre>
+        <p class="annot"><strong>The model only writes this request.</strong> It has no access to your files, network, or shell — it produced a piece of JSON and stopped.</p>
+      </div>
+      <div>
+        <pre class="codeblock"><code>// The harness executes it and appends the result:
+{
+  "type": "tool_result",
+  "content": "index.html\nREADME.md\nsrc/\ntests/ …"
+}</code></pre>
+        <p class="annot"><strong>The harness does everything real:</strong> it validates the request against the tool's schema, checks permissions (maybe asking you first), runs the actual command, and feeds the output back into the context as a new message. Then it calls the model again — that's the agentic loop.</p>
+      </div>
+    </div>
+
+    <h3>What happens when a tool fails</h3>
+    <p>Failure is part of the loop, not an exception to it. If validation rejects the arguments, a permission check denies the call, or the command itself errors out, the harness doesn't abandon the turn — it writes the failure into a <code>tool_result</code> marked as an error and sends it back like any other result. The model reads that error and adapts: correcting a bad path, reaching for a different tool, or telling you plainly why it can't proceed. A turn that looks like it "just worked" has often absorbed two or three failures on the way.</p>
+    <p>Real harnesses layer more machinery on top of the basic loop. They truncate oversized output, so reading one enormous file can't swallow the whole context window. They handle several tool calls from a single model response, sometimes running independent ones in parallel. They stream the model's text back to you as it arrives instead of waiting for the full reply. And they retry transient API failures rather than surfacing every hiccup to you.</p>
+  </div>
+</section>
+
+<section id="glossary">
+  <h2>Glossary</h2>
+  <div class="card">
+    <dl class="gloss">
+      <dt>Harness</dt><dd>The software around the model: it builds the context, calls the model API, executes tool calls, enforces permissions, and loops until the turn is done. Also called an agent framework or scaffold.</dd>
+      <dt>Model (LLM)</dt><dd>A large language model behind an API. Text in, text out — and nothing else: no memory of earlier calls, no side effects, no hands, no network. Its output is <em>sampled</em> rather than computed, so the same input can come back worded differently each time.</dd>
+      <dt>Token</dt><dd>The unit models read and write — roughly ¾ of an English word. Context limits, costs, and speed are all measured in tokens.</dd>
+      <dt>Context window</dt><dd>The complete stack of text the model sees on one call: system prompt, tool definitions, and conversation so far. Capped at a hard token limit.</dd>
+      <dt>System prompt</dt><dd>Instructions the harness places first in the context: role, rules, style, environment details. The user usually never sees it.</dd>
+      <dt>Tool call</dt><dd>A structured request the model writes (a name plus JSON arguments) asking the harness to do something in the real world.</dd>
+      <dt>Agentic loop</dt><dd>The cycle the harness runs: call model → if it requested a tool, execute it, append the result, call again → repeat until the model answers in plain text.</dd>
+    </dl>
+    <h3>Common misconceptions</h3>
+    <ul class="myths">
+      <li><div class="myth">"The AI ran a command on my machine."</div><div class="truth">The model wrote a request; the harness ran the command. Sandboxing, permission prompts, and allowlists all live in the harness — which is exactly why harness design matters for safety.</div></li>
+      <li><div class="myth">"It remembers our conversation."</div><div class="truth">The model forgets everything after each call. The harness re-sends the whole history every time, and may summarize old parts when the window fills up.</div></li>
+      <li><div class="myth">"It's thinking while the tool runs."</div><div class="truth">During a call the model really is working — many models spend hundreds of "thinking" tokens reasoning before they commit to an answer. But <em>between</em> calls it doesn't exist as a running process at all. The harness executes the tool while nothing on the model side is running, then wakes the model up with a bigger context.</div></li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  A single self-contained HTML file — no frameworks, no network, no real model behind it. View source to see how the simulation works.
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- Data ---------- */
+  var BLOCKS = {
+    sys:    {label:"System prompt",           detail:"“You are a coding agent. Be precise…”", tokens:1200, cls:"b-sys"},
+    tools:  {label:"Tool definitions",        detail:"list_files, read_file, run_shell…",              tokens:2400, cls:"b-tools"},
+    user1:  {label:"User message",            detail:"“What’s in this project?”",             tokens:12,   cls:"b-user"},
+    call1:  {label:"Assistant — tool call", detail:"list_files(path: \".\")",                 tokens:40,   cls:"b-call"},
+    result1:{label:"Tool result",             detail:"index.html, README.md, src/, tests/…",           tokens:180,  cls:"b-result"},
+    ans:    {label:"Assistant — answer",  detail:"“This project contains a web app…”",   tokens:95,   cls:"b-ans"}
+  };
+  var BLOCK_ORDER = ["sys","tools","user1","call1","result1","ans"];
+  var WINDOW_MAX = 200000;   // a realistic context limit, used for the "% of a real window" copy
+  var METER_MAX  = 5000;     // bar scale: this turn tops out at ~3.9K, so growth stays legible
+
+  // Each stage: caption, highlighted actor, optional packet move, blocks added.
+  var STAGES = [
+    {label:"Ready", actor:null, move:null, add:[],
+     caption:"Press <strong>Play</strong> to watch one full agentic turn, or <strong>Step</strong> to move through it at your own pace."},
+    {label:"Step 1 · The question", actor:"user", move:null, add:[],
+     caption:"The user types <em>“What’s in this project?”</em> — something the model can’t know from training data. Answering will require looking at the actual files."},
+    {label:"Step 2 · Message sent", actor:"harness", move:{from:"user",to:"harness",text:"user message"}, add:[],
+     caption:"The message goes to the <strong>harness</strong> first — never straight to the model. The harness now has a job to run, not just text to forward."},
+    {label:"Step 3 · Context assembly", actor:"harness", move:null, add:["sys","tools","user1"],
+     caption:"The harness builds the <strong>context window</strong>: a system prompt (who the assistant is, the rules), definitions of every available tool, and the user’s message. That stack — shown in the context window panel — is everything the model will get to see."},
+    {label:"Step 4 · Model call #1", actor:"model", move:{from:"harness",to:"model",text:"full context · {TOKENS}"}, add:[],
+     caption:"The harness sends the <em>entire</em> stack to the model API. Models are stateless — this bundle is the model’s whole world for this call."},
+    {label:"Step 5 · The model decides", actor:"model", move:null, add:["call1"],
+     caption:"The model reads everything and realizes it needs information it doesn’t have. So instead of answering, it writes a <strong>tool call</strong>: a structured request — <code>list_files(\".\")</code> — and stops."},
+    {label:"Step 6 · Tool call returned", actor:"harness", move:{from:"model",to:"harness",text:"tool call (JSON)"}, add:[],
+     caption:"The tool call comes back to the harness as plain structured text. Note what did <em>not</em> happen: the model didn’t touch a single file. It only asked."},
+    {label:"Step 7 · Validate & authorize", actor:"harness", move:null, add:[],
+     caption:"The harness checks the request against the tool’s schema and its permission rules — is this tool allowed? does it need user approval? This safety gate lives entirely in the harness."},
+    {label:"Step 8 · Execution", actor:"tools", move:{from:"harness",to:"tools",text:"list_files(\".\")"}, add:[],
+     caption:"The <strong>harness executes the tool</strong> in the real environment — here, listing the project directory. The model is completely idle right now; it isn’t even running."},
+    {label:"Step 9 · Result captured", actor:"harness", move:{from:"tools",to:"harness",text:"file listing · stdout"}, add:[],
+     caption:"The file listing comes back to the harness: names and folders — raw output from the real world."},
+    {label:"Step 10 · Result appended", actor:"harness", move:null, add:["result1"],
+     caption:"The harness appends the tool result to the context stack as a new message. The window just grew — every loop iteration makes the next model call a little bigger."},
+    {label:"Step 11 · Model call #2", actor:"model", move:{from:"harness",to:"model",text:"updated context · {TOKENS}"}, add:[],
+     caption:"The harness calls the model <em>again</em>, re-sending everything — now including the tool result. This is the <strong>agentic loop</strong>: call, execute, append, call again."},
+    {label:"Step 12 · The answer", actor:"model", move:null, add:["ans"],
+     caption:"This time the model has what it needs. It writes a plain-text answer describing the project — no tool call — which signals the loop can end."},
+    {label:"Step 13 · Answer returned", actor:"harness", move:{from:"model",to:"harness",text:"final text"}, add:[],
+     caption:"The answer travels back to the harness, which sees there’s no further tool request — the turn is complete."},
+    {label:"Step 14 · Delivered", actor:"user", move:{from:"harness",to:"user",text:"answer"}, add:[],
+     caption:"The harness delivers the answer to the user. One turn: 2 model calls, 1 tool execution, and a context window that grew at every step."},
+    {label:"Done", actor:null, move:null, add:[],
+     caption:"That’s the whole trick — repeated. Complex agent sessions are just this loop running many times: more tool calls, more results, an ever-growing context. Press <strong>Reset</strong> to run it again."}
+  ];
+  var LAST = STAGES.length - 1;        // index of the "Done" frame
+  var STEP_COUNT = LAST - 1;           // 14 labelled steps; "Done" is not one of them
+
+  /* ---------- Elements ---------- */
+  var $ = function(id){ return document.getElementById(id); };
+  var els = {
+    sim: document.querySelector(".sim"),
+    diagram: $("diagram"), wires: $("wires"), packet: $("packet"),
+    caption: $("caption"), stageLabel: $("stage-label"),
+    play: $("btn-play"), step: $("btn-step"), reset: $("btn-reset"), speed: $("speed"),
+    playIcon: $("btn-play").querySelector(".btn-icon"),
+    playWord: $("btn-play").querySelector(".btn-word"),
+    progressText: $("progress-text"), progressFill: $("progress-fill"),
+    stack: $("ctx-stack"), tokenCount: $("token-count"), tokenFill: $("token-fill"),
+    tokenNote: $("token-note"), ctxSummary: $("ctx-summary"), maxline: $("maxline"),
+    walkthrough: $("walkthrough-list")
+  };
+  var actors = {
+    user: $("actor-user"), harness: $("actor-harness"),
+    model: $("actor-model"), tools: $("actor-tools")
+  };
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reducedMotion = motionQuery.matches;
+  // Honor the OS setting if it is toggled while the page is open.
+  if (motionQuery.addEventListener){
+    motionQuery.addEventListener("change", function(e){ reducedMotion = e.matches; });
+  }
+
+  /* ---------- Token helpers (single source of truth: BLOCKS) ---------- */
+  // Every token figure on the page is derived from BLOCKS / WINDOW_MAX / METER_MAX
+  // so the copy can never drift from the data.
+  function shortTokens(n){
+    if (n < 1000) return String(n);
+    var k = n / 1000;
+    return (k % 1 === 0 ? k : k.toFixed(1)) + "K";
+  }
+  function blocksThrough(i){
+    var ids = [];
+    for (var s = 0; s <= i; s++) STAGES[s].add.forEach(function(id){ ids.push(id); });
+    return ids;
+  }
+  function tokensThrough(i){
+    return blocksThrough(i).reduce(function(sum, id){ return sum + BLOCKS[id].tokens; }, 0);
+  }
+  // Stage copy may contain {TOKENS}; it resolves to the stack size at that stage.
+  function fillTokens(str, i){
+    return str.indexOf("{TOKENS}") === -1 ? str
+      : str.replace(/\{TOKENS\}/g, shortTokens(tokensThrough(i)) + " tokens");
+  }
+
+  /* ---------- Context stack (pre-rendered, toggled per stage) ---------- */
+  var blockEls = {};
+  BLOCK_ORDER.forEach(function(id){
+    var b = BLOCKS[id];
+    var div = document.createElement("div");
+    div.className = "ctx-block " + b.cls;
+    div.innerHTML = "<span class='bt'>≈" + b.tokens.toLocaleString() + " tok</span>" +
+                    "<div class='bl'></div><div class='bd'></div>";
+    div.querySelector(".bl").textContent = b.label;
+    var bd = div.querySelector(".bd");
+    bd.textContent = b.detail;
+    bd.title = b.detail;          // the text is ellipsized on wide screens
+    div.hidden = true;
+    els.stack.appendChild(div);
+    blockEls[id] = div;
+  });
+
+  /* ---------- Diagram wiring ---------- */
+  function center(actorId){
+    var el = actors[actorId];
+    return { x: el.offsetLeft + el.offsetWidth/2, y: el.offsetTop + el.offsetHeight/2 };
+  }
+  function drawWires(){
+    var pairs = [["user","harness"],["harness","model"],["harness","tools"]];
+    var svg = els.wires;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    pairs.forEach(function(p){
+      var a = center(p[0]), b = center(p[1]);
+      var line = document.createElementNS("http://www.w3.org/2000/svg","line");
+      line.setAttribute("x1",a.x); line.setAttribute("y1",a.y);
+      line.setAttribute("x2",b.x); line.setAttribute("y2",b.y);
+      svg.appendChild(line);
+    });
+  }
+
+  function placePacket(pt){
+    // Keep the pill fully inside the diagram: at the outer actors a long label
+    // would otherwise hang past the edge and widen the page.
+    var half = els.packet.offsetWidth / 2;
+    var box = els.diagram.clientWidth;
+    var x = pt.x;
+    if (box > els.packet.offsetWidth) x = Math.min(Math.max(x, half), box - half);
+    els.packet.style.transform = "translate(" + x + "px," + pt.y + "px) translate(-50%,-50%)";
+  }
+  function flyPacket(move, stageIndex, animate){
+    var p = els.packet;
+    p.textContent = fillTokens(move.text, stageIndex);
+    p.classList.add("visible");
+    p.style.transition = "none";
+    placePacket(center(move.from));
+    if (!animate || reducedMotion){
+      placePacket(center(move.to));
+      return;
+    }
+    void p.offsetWidth; // flush so the start position is committed
+    p.style.transition = "transform " + Math.round(650/speed()) + "ms ease-in-out";
+    placePacket(center(move.to));
+  }
+  function hidePacket(){
+    els.packet.classList.remove("visible");
+    els.packet.style.transition = "none";
+  }
+
+  /* ---------- State ---------- */
+  var current = 0;
+  var timer = null;
+
+  function speed(){ return parseFloat(els.speed.value) || 1; }
+
+  function applyStage(i, animate){
+    current = i;
+    var st = STAGES[i];
+
+    // Actor highlight
+    Object.keys(actors).forEach(function(id){
+      actors[id].className = "actor" + (st.actor === id ? " hl-" + id : "");
+    });
+
+    // Packet
+    if (st.move) flyPacket(st.move, i, animate);
+    else hidePacket();
+
+    // Caption
+    els.stageLabel.textContent = st.label;
+    els.caption.innerHTML = fillTokens(st.caption, i);
+
+    // Context stack. A block that is appearing for the first time must be
+    // un-hidden in one frame and get .in on the NEXT one, otherwise the
+    // opacity/transform transition has no start frame and never plays.
+    var visible = blocksThrough(i);
+    var reveal = [];
+    BLOCK_ORDER.forEach(function(id){
+      var el = blockEls[id];
+      var show = visible.indexOf(id) !== -1;
+      var wasVisible = !el.hidden;
+      el.hidden = !show;
+      if (!show) el.classList.remove("in");
+      else if (wasVisible || reducedMotion || !animate) el.classList.add("in");
+      else reveal.push(el);
+    });
+    if (reveal.length){
+      requestAnimationFrame(function(){
+        // Skip anything that has since been hidden again (e.g. by Reset).
+        reveal.forEach(function(el){ if (!el.hidden) el.classList.add("in"); });
+      });
+    }
+
+    // Token meter. The bar reads against METER_MAX so each appended block visibly
+    // moves it; the real-window percentage is spelled out in text so the scale
+    // stays honest. Every figure is derived, never hardcoded.
+    var total = tokensThrough(i);
+    var scaleNote = "Bar is scaled to " + METER_MAX.toLocaleString() + " tokens so the growth is readable. ";
+    els.tokenCount.textContent = total.toLocaleString() + " tokens";
+    els.tokenFill.style.width = Math.min(100, (total / METER_MAX) * 100) + "%";
+    els.tokenNote.textContent = total === 0
+      ? scaleNote + "A real window holds around " + WINDOW_MAX.toLocaleString() + "."
+      : scaleNote + "That is " + (total / WINDOW_MAX * 100).toFixed(1) + "% of a real "
+        + WINDOW_MAX.toLocaleString() + "-token window.";
+
+    // Spoken equivalent of the stack, announced only when it actually changes.
+    var summary = visible.length + (visible.length === 1 ? " block, " : " blocks, ")
+      + total.toLocaleString() + " tokens";
+    if (els.ctxSummary.textContent !== summary) els.ctxSummary.textContent = summary;
+
+    // Progress. Labelled steps run 1..STEP_COUNT; index LAST is the "Done" frame.
+    els.progressText.textContent = i === 0 ? "Step 0 of " + STEP_COUNT :
+      (i === LAST ? "Complete" : "Step " + i + " of " + STEP_COUNT);
+    els.progressFill.style.width = (i / LAST * 100) + "%";
+
+    if (i === LAST) stopPlay();
+  }
+
+  /* ---------- Controls ---------- */
+  function stepOnce(){
+    if (current >= LAST){
+      els.caption.innerHTML = "The turn is complete — press <strong>Reset</strong> (or Play) to run it again.";
+      return;
+    }
+    applyStage(current + 1, true);
+  }
+  function startPlay(){
+    if (current >= LAST) applyStage(0, false);
+    els.playIcon.textContent = "❚❚";
+    els.playWord.textContent = "Pause";
+    // Advance immediately so Play from Ready shows something at once, rather
+    // than sitting on stage 0 for a full interval.
+    stepOnce();
+    if (current >= LAST){ stopPlay(); return; }
+    schedule();
+  }
+  function schedule(){
+    clearInterval(timer);
+    timer = setInterval(function(){
+      stepOnce();
+      if (current >= LAST) stopPlay();
+    }, 2400 / speed());
+  }
+  function stopPlay(){
+    clearInterval(timer);
+    timer = null;
+    els.playIcon.textContent = "▶";
+    els.playWord.textContent = "Play";
+  }
+  function togglePlay(){ timer ? stopPlay() : startPlay(); }
+  function reset(){ stopPlay(); applyStage(0, false); }
+
+  els.play.addEventListener("click", togglePlay);
+  els.step.addEventListener("click", function(){ stopPlay(); stepOnce(); });
+  els.reset.addEventListener("click", reset);
+  els.speed.addEventListener("change", function(){ if (timer) schedule(); });
+
+  // True when any part of the simulation panel is on screen. Scoping the
+  // shortcuts to that keeps Space working as page-scroll everywhere else.
+  function simInView(){
+    var r = els.sim.getBoundingClientRect();
+    var h = window.innerHeight || document.documentElement.clientHeight;
+    return r.bottom > 0 && r.top < h;
+  }
+
+  document.addEventListener("keydown", function(e){
+    // Shortcuts stay available wherever the user has tabbed to, but never
+    // hijack native keyboard behavior: text fields and selects are left alone,
+    // browser chords (Cmd+R, Ctrl+Space…) pass straight through, and Space is
+    // left to activate a focused button the way it normally does.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var tag = e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+    if (!simInView()) return;
+    if (e.key === "ArrowRight"){ e.preventDefault(); stopPlay(); stepOnce(); }
+    else if (e.key === " "){ if (tag === "BUTTON") return; e.preventDefault(); togglePlay(); }
+    else if (e.key === "r" || e.key === "R"){ reset(); }
+  });
+
+  // The diagram is flex:1 inside a column whose caption box changes height per
+  // step, so it can resize without the window ever resizing. Observe the element
+  // itself and keep the window listener as a fallback for older browsers.
+  function refreshDiagram(){
+    drawWires();
+    var st = STAGES[current];
+    if (st.move){
+      els.packet.style.transition = "none";
+      placePacket(center(st.move.to));
+    }
+  }
+  window.addEventListener("resize", refreshDiagram);
+  if (window.ResizeObserver){
+    new ResizeObserver(refreshDiagram).observe(els.diagram);
+  }
+
+  /* ---------- Static walkthrough (built from the same STAGES data) ---------- */
+  // Rendered from STAGES so the prose version can never drift from the
+  // simulation, and so a reader who never touches the controls still gets
+  // the whole loop.
+  STAGES.forEach(function(st, i){
+    if (i === 0 || i === LAST) return;          // "Ready" and "Done" are framing, not steps
+    var li = document.createElement("li");
+    var label = document.createElement("div");
+    label.className = "wl";
+    label.textContent = st.label.replace(/^Step \d+ · /, "");
+    var body = document.createElement("div");
+    body.className = "wc";
+    body.innerHTML = st.caption;
+    li.appendChild(label);
+    li.appendChild(body);
+    els.walkthrough.appendChild(li);
+  });
+
+  /* ---------- Init ---------- */
+  els.maxline.textContent = "token limit — e.g. " + shortTokens(WINDOW_MAX);
+  drawWires();
+  applyStage(0, false);
+})();
+</script>
+</body>
+</html>
