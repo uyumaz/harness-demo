@@ -37,6 +37,10 @@
   code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   main,header.site,footer.site{max-width:1080px;margin:0 auto;padding:0 20px}
   header.site{padding-top:56px;padding-bottom:8px;text-align:center}
+  .partmark{
+    display:inline-block;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+    font-weight:700;color:var(--c-harness);margin-bottom:12px;
+  }
   header.site h1{font-size:clamp(1.8rem,4.5vw,2.6rem);line-height:1.15;margin:0 0 10px}
   header.site .hook{color:var(--muted);font-size:1.1rem;max-width:46em;margin:0 auto}
   section{margin:56px 0}
@@ -264,8 +268,10 @@
 <body>
 
 <header class="site">
+  <span class="partmark">Part 1 of 2</span>
   <h1>How AI Harnesses Work</h1>
   <p class="hook">The model writes the words. Everything else — building the prompt, running the tools, looping until the job is done — is the <em>harness</em>. Watch one turn happen, piece by piece.</p>
+  <p class="hook"><a href="agent.html">Part 2: Agent Anatomy &rarr;</a></p>
 </header>
 
 <main>
@@ -317,6 +323,7 @@
           <!-- Glyphs are aria-hidden so each button's accessible name is exactly its
                visible word ("Play"/"Pause", "Step", "Reset") — WCAG 2.5.3. -->
           <button id="btn-play" class="primary"><span class="btn-icon" aria-hidden="true">▶</span><span class="btn-word">Play</span></button>
+          <button id="btn-back"><span class="btn-icon" aria-hidden="true">&lsaquo;</span><span class="btn-word">Back</span></button>
           <button id="btn-step"><span class="btn-word">Step</span><span class="btn-icon" aria-hidden="true">›</span></button>
           <button id="btn-reset"><span class="btn-icon" aria-hidden="true">↺</span><span class="btn-word">Reset</span></button>
           <span class="spacer"></span>
@@ -329,7 +336,7 @@
           <span class="progress" id="progress-text">Step 0 of 14</span>
         </div>
         <div class="progress-bar" aria-hidden="true"><div id="progress-fill"></div></div>
-        <p class="kbd-hint"><kbd>Space</kbd> play/pause · <kbd>→</kbd> step · <kbd>R</kbd> reset</p>
+        <p class="kbd-hint"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> back/step · <kbd>R</kbd> reset</p>
       </div>
 
       <aside class="ctx-panel" aria-label="Context window contents">
@@ -540,6 +547,7 @@
 </main>
 
 <footer class="site">
+  <p>Part 1 of 2. <a href="agent.html">Continue to part 2: Agent Anatomy &rarr;</a></p>
   A single self-contained HTML file — no frameworks, no network, no real model behind it. View source to see how the simulation works.
 </footer>
 
@@ -607,7 +615,8 @@
     sim: document.querySelector(".sim"),
     diagram: $("diagram"), wires: $("wires"), packet: $("packet"),
     caption: $("caption"), stageLabel: $("stage-label"),
-    play: $("btn-play"), step: $("btn-step"), reset: $("btn-reset"), speed: $("speed"),
+    play: $("btn-play"), step: $("btn-step"), back: $("btn-back"),
+    reset: $("btn-reset"), speed: $("speed"),
     playIcon: $("btn-play").querySelector(".btn-icon"),
     playWord: $("btn-play").querySelector(".btn-word"),
     progressText: $("progress-text"), progressFill: $("progress-fill"),
@@ -777,6 +786,9 @@
       (i === LAST ? "Complete" : "Step " + i + " of " + STEP_COUNT);
     els.progressFill.style.width = (i / LAST * 100) + "%";
 
+    if (i === 0 && document.activeElement === els.back) els.step.focus();
+    els.back.disabled = (i === 0);
+
     if (i === LAST) stopPlay();
   }
 
@@ -787,6 +799,13 @@
       return;
     }
     applyStage(current + 1, true);
+  }
+  // Backward always takes the instant path: every visible property is derived
+  // from the stage index, so there is nothing to replay — and a reversed packet
+  // flight would imply data moving the wrong way.
+  function stepBack(){
+    if (current <= 0) return;
+    applyStage(current - 1, false);
   }
   function startPlay(){
     if (current >= LAST) applyStage(0, false);
@@ -816,6 +835,7 @@
 
   els.play.addEventListener("click", togglePlay);
   els.step.addEventListener("click", function(){ stopPlay(); stepOnce(); });
+  els.back.addEventListener("click", function(){ stopPlay(); stepBack(); });
   els.reset.addEventListener("click", reset);
   els.speed.addEventListener("change", function(){ if (timer) schedule(); });
 
@@ -836,7 +856,14 @@
     var tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
     if (!simInView()) return;
-    if (e.key === "ArrowRight"){ e.preventDefault(); stopPlay(); stepOnce(); }
+    if (e.key === "ArrowRight"){
+      if (current >= LAST) return;              // no-op: leave the key alone
+      e.preventDefault(); stopPlay(); stepOnce();
+    }
+    else if (e.key === "ArrowLeft"){
+      if (current <= 0) return;
+      e.preventDefault(); stopPlay(); stepBack();
+    }
     else if (e.key === " "){ if (tag === "BUTTON") return; e.preventDefault(); togglePlay(); }
     else if (e.key === "r" || e.key === "R"){ reset(); }
   });

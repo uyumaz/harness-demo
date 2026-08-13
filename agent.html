@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Part two of a visual guide to AI agents: what an agent is composed of, how its knowledge is layered and loaded just in time, what a skill is, and how one autonomous task actually runs — including self-correction and the permission gate that bounds autonomy.">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1420" media="(prefers-color-scheme: dark)">
+<title>Agent Anatomy</title>
+<style>
+  /* Page 1's tokens, copied verbatim. Each page stays self-contained by design,
+     so this duplication is deliberate — there is no shared stylesheet. */
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef0f4; --text:#1c2330; --muted:#5b6474;
+    --line:#d8dde6; --accent:#2563eb;
+    --c-user:#2563eb; --c-user-bg:#e4edfd;
+    --c-harness:#b45309; --c-harness-bg:#fdeeda;
+    --c-model:#7c3aed; --c-model-bg:#f0e8fd;
+    --c-tools:#047857; --c-tools-bg:#dcf5ec;
+    --code-bg:#f0f2f6; --shadow:0 1px 3px rgba(16,24,40,.08),0 4px 14px rgba(16,24,40,.06);
+    /* page-2 additions: one colour per knowledge layer, used by both the
+       anatomy diagram and the context panel so the mapping is learnable */
+    --c-identity:#be123c; --c-identity-bg:#fde7ec;
+    --c-semantic:#0e7490; --c-semantic-bg:#d9f2f7;
+    --c-skill:#a21caf;    --c-skill-bg:#fbe8ff;
+    --c-memory:#a16207;   --c-memory-bg:#fbf0d6;
+    --c-policy:#b91c1c;   --c-policy-bg:#fde8e8;
+    --c-work:#475569;     --c-work-bg:#e9edf3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1420; --surface:#171e2e; --surface-2:#1f2839; --text:#e7ebf2; --muted:#9aa4b5;
+      --line:#2c3750; --accent:#6ea0ff;
+      --c-user:#7fa9ff; --c-user-bg:#1d2b4a;
+      --c-harness:#f0a860; --c-harness-bg:#3a2a16;
+      --c-model:#bda1f7; --c-model-bg:#2e2348;
+      --c-tools:#5ed3ab; --c-tools-bg:#123529;
+      --code-bg:#111827; --shadow:0 1px 3px rgba(0,0,0,.5);
+      --c-identity:#fb7185; --c-identity-bg:#3d1622;
+      --c-semantic:#5ed3e8; --c-semantic-bg:#0d2e38;
+      --c-skill:#f0abfc;    --c-skill-bg:#3b1043;
+      --c-memory:#e3b341;   --c-memory-bg:#382c11;
+      --c-policy:#f87171;   --c-policy-bg:#3a1717;
+      --c-work:#94a3b8;     --c-work-bg:#232b39;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  main,header.site,footer.site{max-width:1080px;margin:0 auto;padding:0 20px}
+  header.site{padding-top:56px;padding-bottom:8px;text-align:center}
+  header.site h1{font-size:clamp(1.8rem,4.5vw,2.6rem);line-height:1.15;margin:0 0 10px}
+  header.site .hook{color:var(--muted);font-size:1.1rem;max-width:46em;margin:0 auto}
+  .partmark{
+    display:inline-block;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+    font-weight:700;color:var(--c-harness);margin-bottom:12px;
+  }
+  section{margin:56px 0}
+  h2{font-size:1.5rem;margin:0 0 12px}
+  h3{font-size:1.1rem;margin:24px 0 8px}
+  p{max-width:46em}
+  .lede{font-size:1.05rem}
+  .small{font-size:.85rem;color:var(--muted)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 24px}
+  pre.codeblock{
+    background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;font-size:.82rem;line-height:1.55;overflow-x:auto;margin:0;
+  }
+  .annot{font-size:.85rem;color:var(--muted);margin-top:10px}
+  .annot strong{color:var(--text)}
+  .callout{
+    border-left:3px solid var(--c-harness);background:var(--surface-2);
+    border-radius:0 10px 10px 0;padding:14px 18px;margin:20px 0;max-width:48em;
+  }
+  .callout p:last-child{margin-bottom:0}
+  footer.site{padding:40px 20px 56px;color:var(--muted);font-size:.85rem;text-align:center}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .noscript{border:1px solid var(--c-harness);background:var(--c-harness-bg);border-radius:10px;padding:14px 16px;margin:0 0 20px;max-width:46em;font-size:.92rem}
+  .js-only{display:none}
+  .js .js-only{display:block}
+
+  /* ---------- Agent anatomy ---------- */
+  .anat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px;margin:0 0 18px}
+  .anat-node{
+    font:inherit;text-align:left;background:var(--surface);
+    border:2px solid var(--line);border-radius:11px;padding:11px 12px;color:var(--text);
+    transition:border-color .2s,box-shadow .2s,opacity .2s;
+  }
+  .anat-node .an-name{font-weight:700;font-size:.9rem;display:block}
+  .anat-node .an-kind{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:650}
+  .anat.js .anat-node{cursor:pointer}
+  .anat.js .anat-node:hover{border-color:var(--accent)}
+  .anat-node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .anat-node[aria-expanded="true"]{border-color:var(--c);box-shadow:0 0 0 4px var(--cbg)}
+  /* .42 pushed label contrast under 4.5:1; .68 keeps it above in both themes. */
+  .anat.js.picked .anat-node[aria-expanded="false"]{opacity:.68}
+  .anat-node[data-comp="model"]{--c:var(--c-model);--cbg:var(--c-model-bg)}
+  .anat-node[data-comp="harness"]{--c:var(--c-harness);--cbg:var(--c-harness-bg)}
+  .anat-node[data-comp="identity"]{--c:var(--c-identity);--cbg:var(--c-identity-bg)}
+  .anat-node[data-comp="semantic"]{--c:var(--c-semantic);--cbg:var(--c-semantic-bg)}
+  .anat-node[data-comp="skills"]{--c:var(--c-skill);--cbg:var(--c-skill-bg)}
+  .anat-node[data-comp="tools"]{--c:var(--c-tools);--cbg:var(--c-tools-bg)}
+  .anat-node[data-comp="memory"]{--c:var(--c-memory);--cbg:var(--c-memory-bg)}
+  .anat-node[data-comp="policy"]{--c:var(--c-policy);--cbg:var(--c-policy-bg)}
+  .anat-defs{background:var(--surface-2);border-radius:12px;padding:16px 18px}
+  .anat-def h3{margin:0 0 4px;font-size:1rem}
+  .anat-def p{margin:0 0 8px;max-width:none}
+  .anat-def p:last-child{margin-bottom:0}
+  .anat-def .an-role{font-size:.88rem;color:var(--muted)}
+  .anat-def .an-role strong{color:var(--text)}
+  .anat.js .anat-def{display:none}
+  .anat.js .anat-def.is-open{display:block}
+  .anat-hint{color:var(--muted);font-size:.9rem;margin:0}
+
+  /* ---------- layered knowledge stack ---------- */
+  .tiers{display:flex;flex-direction:column;gap:8px;margin:0}
+  /* Shorthand FIRST, then the coloured longhand — the other order resets the
+     left border back to --line and every tier rail renders grey. */
+  .tier{border:1px solid var(--line);border-left:5px solid var(--c);
+        background:var(--surface);border-radius:8px;padding:10px 13px}
+  .tier .t-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+  .tier .t-name{font-weight:700;font-size:.92rem}
+  .tier .t-rule{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--c)}
+  .tier .t-body{font-size:.87rem;color:var(--muted);margin-top:3px}
+  .tier[data-layer="identity"]{--c:var(--c-identity)}
+  .tier[data-layer="project"]{--c:var(--c-semantic)}
+  .tier[data-layer="skill"]{--c:var(--c-skill)}
+  .tier[data-layer="memory"]{--c:var(--c-memory)}
+  .tier[data-layer="work"]{--c:var(--c-work)}
+
+  /* ---------- simulation ---------- */
+  .sim{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px}
+  .sim-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:20px;align-items:start}
+  .stage-wrap{display:flex;flex-direction:column;min-width:0;align-self:start}
+  /* Spatial diagram in page 1's idiom: positioned actor boxes, a dashed SVG wire
+     mesh redrawn from live element positions, and a pill that flies along it.
+     Knowledge sources feed the harness on the left; the harness reaches the
+     model, tools and policy on the right — so every wire passes through it. */
+  .diagram{
+    position:relative;min-height:430px;
+    display:grid;gap:12px 48px;align-content:space-between;
+    grid-template-columns:1fr 1.05fr 1fr;
+    grid-template-areas:
+      "identity harness model"
+      "semantic harness tools"
+      "skills   harness policy"
+      "memory   harness .";
+    padding:10px 6px 8px;overflow:hidden;
+  }
+  .wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .wires line{stroke:var(--line);stroke-width:2;stroke-dasharray:5 6}
+  .actor{
+    position:relative;z-index:1;background:var(--surface);border:2px solid var(--line);
+    border-radius:12px;padding:9px 8px;text-align:center;align-self:center;
+    transition:border-color .25s,box-shadow .25s;
+  }
+  .actor .icon{font-size:1.35rem;line-height:1}
+  .actor .name{font-weight:700;font-size:.85rem;margin-top:3px}
+  .actor .sub{font-size:.68rem;color:var(--muted);line-height:1.3;margin-top:2px}
+  #actor-identity{grid-area:identity} #actor-semantic{grid-area:semantic}
+  #actor-skills{grid-area:skills}     #actor-memory{grid-area:memory}
+  #actor-harness{grid-area:harness}
+  #actor-model{grid-area:model}       #actor-tools{grid-area:tools}
+  #actor-policy{grid-area:policy}
+  .actor.on{border-color:var(--c);box-shadow:0 0 0 4px var(--cbg)}
+  .actor[data-comp="model"]{--c:var(--c-model);--cbg:var(--c-model-bg)}
+  .actor[data-comp="harness"]{--c:var(--c-harness);--cbg:var(--c-harness-bg)}
+  .actor[data-comp="identity"]{--c:var(--c-identity);--cbg:var(--c-identity-bg)}
+  .actor[data-comp="semantic"]{--c:var(--c-semantic);--cbg:var(--c-semantic-bg)}
+  .actor[data-comp="skills"]{--c:var(--c-skill);--cbg:var(--c-skill-bg)}
+  .actor[data-comp="tools"]{--c:var(--c-tools);--cbg:var(--c-tools-bg)}
+  .actor[data-comp="memory"]{--c:var(--c-memory);--cbg:var(--c-memory-bg)}
+  .actor[data-comp="policy"]{--c:var(--c-policy);--cbg:var(--c-policy-bg)}
+  #packet{
+    position:absolute;z-index:2;top:0;left:0;transform:translate(-300px,-300px);
+    background:var(--text);color:var(--bg);font-size:.72rem;font-weight:600;
+    padding:3px 9px;border-radius:99px;white-space:nowrap;opacity:0;pointer-events:none;
+    box-shadow:0 2px 8px rgba(0,0,0,.18);
+    max-width:calc(100% - 12px);overflow:hidden;text-overflow:ellipsis;
+  }
+  #packet.visible{opacity:1}
+
+  .caption-box{margin-top:14px;background:var(--surface-2);border-radius:10px;padding:14px 16px;min-height:6em}
+  .caption-box .stage-label{font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .caption-box p{margin:4px 0 0;max-width:none}
+  .caption-box .gate-flag{
+    display:inline-block;margin-top:8px;font-size:.75rem;font-weight:700;
+    background:var(--c-policy-bg);color:var(--c-policy);border-radius:99px;padding:3px 10px;
+  }
+
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  .controls button{
+    font:inherit;font-weight:600;color:var(--text);background:var(--surface);
+    border:1px solid var(--line);border-radius:8px;padding:8px 16px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .controls button:hover{border-color:var(--accent)}
+  .controls button:focus-visible,.controls select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .controls button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .controls select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px}
+  .controls .spacer{flex:1}
+  .progress{font-variant-numeric:tabular-nums;font-size:.85rem;color:var(--muted)}
+  .progress-bar{height:4px;background:var(--surface-2);border-radius:99px;margin-top:10px;overflow:hidden}
+  .progress-bar>div{height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .3s}
+  kbd{background:var(--surface-2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;font-size:.8rem}
+  .kbd-hint{font-size:.8rem;color:var(--muted);margin-top:10px}
+
+  .ctx-panel{background:var(--surface-2);border-radius:12px;padding:14px;display:flex;flex-direction:column;min-width:0}
+  .ctx-panel h3{margin:0 0 2px;font-size:.95rem}
+  .ctx-sub{font-size:.75rem;color:var(--muted);margin-bottom:10px}
+  .ctx-stack{display:flex;flex-direction:column;gap:5px;min-height:300px}
+  .ctx-block{
+    border-left:4px solid var(--c);border-radius:6px;padding:6px 9px;background:var(--surface);
+    transition:opacity .3s,transform .3s,margin .3s,padding .3s,max-height .3s;
+    max-height:120px;overflow:hidden;
+  }
+  .ctx-block.enter{opacity:0;transform:translateY(6px)}
+  /* Blocks removed by compaction collapse and fade instead of vanishing, so the
+     merge is something you watch rather than something you infer. */
+  .ctx-block.leaving{
+    opacity:0;transform:translateX(-10px);max-height:0;
+    padding-top:0;padding-bottom:0;margin-bottom:-5px;pointer-events:none;
+  }
+  .ctx-block .bl{font-size:.77rem;font-weight:700}
+  .ctx-block .bd{font-size:.71rem;color:var(--muted)}
+  .ctx-block .bt{font-size:.67rem;color:var(--muted);float:right;font-variant-numeric:tabular-nums;padding-left:8px}
+  .ctx-block[data-layer="identity"]{--c:var(--c-identity)}
+  .ctx-block[data-layer="project"]{--c:var(--c-semantic)}
+  .ctx-block[data-layer="skill"]{--c:var(--c-skill)}
+  .ctx-block[data-layer="memory"]{--c:var(--c-memory)}
+  .ctx-block[data-layer="work"]{--c:var(--c-work)}
+  .ctx-empty{color:var(--muted);font-size:.82rem;padding:8px 0}
+  /* The memory write happens OUTSIDE the context window, so it gets a marker
+     next to the panel rather than a block inside it. */
+  .mem-flash{
+    margin-top:8px;font-size:.72rem;font-weight:700;color:var(--c-memory);
+    background:var(--c-memory-bg);border-radius:8px;padding:6px 10px;
+  }
+  .ctx-meter{margin-top:12px}
+  .ctx-meter .mlabel{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ctx-meter .mbar{height:8px;background:var(--surface);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:4px}
+  .ctx-meter .mbar>div{height:100%;width:0;background:var(--c-harness);transition:width .35s}
+  .ctx-meter .mnote{font-size:.68rem;color:var(--muted);margin-top:4px}
+  .legend{display:flex;flex-wrap:wrap;gap:5px 14px;list-style:none;padding:0;margin:12px 0 0;font-size:.72rem;color:var(--muted)}
+  .legend li{display:flex;align-items:center;gap:5px}
+  .swatch{width:10px;height:10px;border-radius:3px;background:var(--c)}
+
+  ol.walk{margin:0;padding-left:0;list-style:none;counter-reset:walk;max-width:52em}
+  ol.walk li{counter-increment:walk;display:grid;grid-template-columns:auto minmax(0,1fr);
+             gap:4px 14px;padding:12px 0;border-top:1px solid var(--line)}
+  ol.walk li:first-child{border-top:0;padding-top:0}
+  ol.walk li::before{
+    content:counter(walk);grid-row:1/span 2;align-self:start;
+    width:26px;height:26px;border-radius:50%;background:var(--surface-2);color:var(--muted);
+    font-size:.78rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+  }
+  ol.walk .wl{font-weight:700;font-size:.92rem}
+  ol.walk .wc{color:var(--muted);font-size:.92rem}
+  ol.walk .wc code{background:var(--code-bg);border-radius:4px;padding:0 4px;font-size:.85em}
+  ol.walk .wc .gate-flag{
+    display:inline-block;margin-top:6px;font-size:.72rem;font-weight:700;
+    background:var(--c-policy-bg);color:var(--c-policy);border-radius:99px;padding:2px 9px;
+  }
+  dl.gloss{display:grid;grid-template-columns:max-content 1fr;gap:10px 20px;margin:0}
+  dl.gloss dt{font-weight:700}
+  dl.gloss dd{margin:0;color:var(--muted)}
+
+  @media (max-width:768px){
+    .sim-grid{grid-template-columns:1fr}
+    .diagram{
+      min-height:0;grid-template-columns:1fr 1fr;
+      grid-template-areas:
+        "identity semantic"
+        "skills   memory"
+        "harness  harness"
+        "model    tools"
+        "policy   policy";
+    }
+    dl.gloss{grid-template-columns:1fr;gap:2px}
+    dl.gloss dd{margin-bottom:12px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    .ctx-block,.actor,.anat-node,.progress-bar>div,.ctx-meter .mbar>div{transition:none !important}
+    #packet{transition:none !important}
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <span class="partmark">Part 2 of 2</span>
+  <h1>Agent Anatomy</h1>
+  <p class="hook">Part one took apart a single turn. This one takes apart the <em>agent</em>: what it is made of, how its knowledge is layered and loaded only when needed, and what actually happens when you hand it a task and walk away.</p>
+  <p class="hook"><a href="index.html">&larr; Part 1: How AI Harnesses Work</a></p>
+</header>
+
+<main>
+
+<section id="intro">
+  <p class="lede">You already know the loop: the harness assembles a context window, calls the model, executes any tool the model asks for, appends the result and goes round again. An <strong>agent</strong> is that loop plus everything that decides what goes into the context in the first place &mdash; an identity, a tiered body of knowledge, a library of procedures, a set of tools, a memory, and a policy that says where its autonomy stops.</p>
+  <p>Every term below is defined here or on <a href="index.html">part one</a>. You do not have to run the simulation to follow any of it: the same twenty steps are written out in <a href="#walkthrough">the walkthrough</a> underneath it, and each component is explained in <a href="#anatomy">the anatomy section</a> after that — though with JavaScript on, the component definitions open one at a time when you select one.</p>
+</section>
+
+<section id="simulation" aria-labelledby="sim-h">
+  <h2 id="sim-h">One autonomous task, start to finish</h2>
+  <noscript>
+    <div class="noscript"><strong>JavaScript is turned off.</strong> The simulation below will not run, and the written walkthrough underneath it is rendered by script, so it will be empty too. Everything else reads normally — the agent anatomy (all eight definitions shown at once), the knowledge tiers, the skill and project-context files, the autonomy section and the glossary are plain HTML.</div>
+  </noscript>
+  <p>You give one instruction — <em>&ldquo;upgrade the payments SDK to v3 and ship it&rdquo;</em> — and leave. Twenty steps later there is a deployed release, one corrected mistake, and exactly one interruption. Each component below is defined properly in <a href="#anatomy">the next section</a>; for now, watch which one lights up, what travels between them, and how the context panel fills and empties.</p>
+
+  <div class="sim">
+    <div class="sim-grid">
+      <div class="stage-wrap">
+        <div class="diagram" id="diagram">
+          <svg class="wires" id="wires" aria-hidden="true"></svg>
+
+          <div class="actor" id="actor-identity" data-comp="identity">
+            <div class="icon" aria-hidden="true">&#129706;</div>
+            <div class="name">Identity</div>
+            <div class="sub">role, rules,<br>refusals</div>
+          </div>
+          <div class="actor" id="actor-semantic" data-comp="semantic">
+            <div class="icon" aria-hidden="true">&#128218;</div>
+            <div class="name">Semantic layer</div>
+            <div class="sub">holds project<br>knowledge</div>
+          </div>
+          <div class="actor" id="actor-skills" data-comp="skills">
+            <div class="icon" aria-hidden="true">&#129513;</div>
+            <div class="name">Skills</div>
+            <div class="sub">packaged<br>procedures</div>
+          </div>
+          <div class="actor" id="actor-memory" data-comp="memory">
+            <div class="icon" aria-hidden="true">&#128190;</div>
+            <div class="name">Memory</div>
+            <div class="sub">notes between<br>runs</div>
+          </div>
+
+          <div class="actor" id="actor-harness" data-comp="harness">
+            <div class="icon" aria-hidden="true">&#127913;</div>
+            <div class="name">Harness</div>
+            <div class="sub">assembles context,<br>runs the loop,<br>executes tools</div>
+          </div>
+
+          <div class="actor" id="actor-model" data-comp="model">
+            <div class="icon" aria-hidden="true">&#129504;</div>
+            <div class="name">Model</div>
+            <div class="sub">text in,<br>text out</div>
+          </div>
+          <div class="actor" id="actor-tools" data-comp="tools">
+            <div class="icon" aria-hidden="true">&#128451;</div>
+            <div class="name">Tools</div>
+            <div class="sub">files, shell,<br>deploys</div>
+          </div>
+          <div class="actor" id="actor-policy" data-comp="policy">
+            <div class="icon" aria-hidden="true">&#128737;</div>
+            <div class="name">Policy</div>
+            <div class="sub">what needs<br>approval</div>
+          </div>
+
+          <div id="packet" aria-hidden="true"></div>
+        </div>
+
+        <div class="caption-box" aria-live="polite" aria-atomic="true">
+          <div class="stage-label" id="stage-label">Ready</div>
+          <p id="caption">Press <strong>Play</strong> to watch the whole task run, or <strong>Step</strong> to move through it at your own pace.</p>
+        </div>
+
+        <div class="controls">
+          <button id="btn-play" class="primary"><span class="btn-icon" aria-hidden="true">&#9654;</span><span class="btn-word">Play</span></button>
+          <button id="btn-back"><span class="btn-icon" aria-hidden="true">&lsaquo;</span><span class="btn-word">Back</span></button>
+          <button id="btn-step"><span class="btn-word">Step</span><span class="btn-icon" aria-hidden="true">&rsaquo;</span></button>
+          <button id="btn-reset"><span class="btn-icon" aria-hidden="true">&#8634;</span><span class="btn-word">Reset</span></button>
+          <span class="spacer"></span>
+          <label for="speed" class="progress">Speed</label>
+          <select id="speed">
+            <option value="0.6">Slow</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.8">Fast</option>
+          </select>
+          <span class="progress" id="progress-text">Step 0 of 20</span>
+        </div>
+        <div class="progress-bar" aria-hidden="true"><div id="progress-fill"></div></div>
+        <p class="kbd-hint"><kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> back/step &middot; <kbd>R</kbd> reset</p>
+      </div>
+
+      <aside class="ctx-panel" aria-label="Context window contents">
+        <h3>Context window</h3>
+        <div class="ctx-sub">colour-coded by knowledge layer</div>
+        <div class="ctx-stack" id="ctx-stack"></div>
+        <p class="sr-only" id="ctx-summary" aria-live="polite" aria-atomic="true"></p>
+        <div class="mem-flash" id="mem-flash" hidden>Memory updated &#10003; &mdash; stored outside the context window, costing nothing here</div>
+        <div class="ctx-meter">
+          <div class="mlabel"><span>used</span><span id="token-count">0 tokens</span></div>
+          <div class="mbar"><div id="token-fill"></div></div>
+          <div class="mnote" id="token-note"></div>
+          <div class="mnote">Scaled down so the changes are visible — real context windows run to 100,000 tokens and beyond.</div>
+        </div>
+        <ul class="legend">
+          <li><span class="swatch" style="--c:var(--c-identity)"></span>Identity</li>
+          <li><span class="swatch" style="--c:var(--c-semantic)"></span>Project knowledge</li>
+          <li><span class="swatch" style="--c:var(--c-skill)"></span>Skill</li>
+          <li><span class="swatch" style="--c:var(--c-memory)"></span>Memory</li>
+          <li><span class="swatch" style="--c:var(--c-work)"></span>Working transcript</li>
+        </ul>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section id="walkthrough">
+  <h2>The same run, in writing</h2>
+  <p>Every step of the task above, in order, for reading rather than watching. The two steps worth slowing down on are 9&ndash;12, where the agent corrects its own mistake, and 14&ndash;15, where policy stops it.</p>
+  <div class="card">
+    <ol class="walk" id="walkthrough-list"></ol>
+  </div>
+</section>
+
+<section id="anatomy">
+  <h2>What an agent is composed of</h2>
+  <p>Eight parts. Two of them &mdash; the model and the harness &mdash; are part one's subject and are referenced here rather than re-taught. The other six are what turn a loop into an agent.</p>
+
+  <div class="anat">
+    <div class="anat-grid" id="anat-grid" role="group" aria-label="Agent components">
+      <div class="anat-node" data-comp="model"><span class="an-kind">part 1</span><span class="an-name">Model</span></div>
+      <div class="anat-node" data-comp="harness"><span class="an-kind">part 1</span><span class="an-name">Harness</span></div>
+      <div class="anat-node" data-comp="identity"><span class="an-kind">knowledge</span><span class="an-name">Identity</span></div>
+      <div class="anat-node" data-comp="semantic"><span class="an-kind">knowledge</span><span class="an-name">Semantic layer</span></div>
+      <div class="anat-node" data-comp="skills"><span class="an-kind">knowledge</span><span class="an-name">Skills</span></div>
+      <div class="anat-node" data-comp="tools"><span class="an-kind">capability</span><span class="an-name">Tools</span></div>
+      <div class="anat-node" data-comp="memory"><span class="an-kind">knowledge</span><span class="an-name">Memory</span></div>
+      <div class="anat-node" data-comp="policy"><span class="an-kind">control</span><span class="an-name">Permission policy</span></div>
+    </div>
+
+    <div class="anat-defs" id="anat-defs">
+      <p class="anat-hint js-only" id="anat-hint">Select a component above to read what it does. All eight definitions are printed below when JavaScript is off.</p>
+
+      <div class="anat-def" id="def-model">
+        <h3>Model</h3>
+        <p>A large language model behind an API: text in, text out, no memory between calls and no side effects. It decides <em>what to ask for</em>; it never does anything itself.</p>
+        <p class="an-role"><strong>Architectural role:</strong> a stateless third-party dependency. Taken apart in <a href="index.html#glossary">part one</a>.</p>
+      </div>
+      <div class="anat-def" id="def-harness">
+        <h3>Harness</h3>
+        <p>The ordinary program around the model: it builds the context window, makes the HTTP call, parses the reply, executes tool calls, and runs the loop until the work is done.</p>
+        <p class="an-role"><strong>Architectural role:</strong> the whole control plane. Everything else on this page is something the harness loads, enforces or executes. See <a href="index.html#deep-dive">Inside the harness</a>.</p>
+      </div>
+      <div class="anat-def" id="def-identity">
+        <h3>Identity</h3>
+        <p>The always-resident instructions that say who this agent is: its role, its tone, its hard rules, its refusals. Technically it is a system prompt &mdash; the thing part one showed sitting at the front of every request.</p>
+        <p class="an-role"><strong>Architectural role:</strong> the one knowledge layer that is never evicted, so it is also the most expensive per token &mdash; you pay for it on every single model call of every run.</p>
+      </div>
+      <div class="anat-def" id="def-semantic">
+        <h3>Semantic layer</h3>
+        <p>The agent's structured knowledge about <em>this</em> domain: repository conventions, architecture notes, domain vocabulary, the rules that are true regardless of today's task. It is what turns a general assistant into one that knows your system.</p>
+        <p class="an-role"><strong>Architectural role:</strong> a tiered cache over a knowledge base. Some tiers are always resident, some are fetched on demand, some are evictable &mdash; because context, not storage, is the scarce resource.</p>
+      </div>
+      <div class="anat-def" id="def-skills">
+        <h3>Skills</h3>
+        <p>Named, packaged procedures: a piece of metadata saying when the skill applies, plus instructions for carrying it out. &ldquo;Upgrade a dependency&rdquo; or &ldquo;triage a failing build&rdquo; are skills. They sit on disk until a task matches one.</p>
+        <p class="an-role"><strong>Architectural role:</strong> lazily loaded procedure library. Adding the hundredth skill costs nothing at run time, because only the matching one is ever read into context.</p>
+      </div>
+      <div class="anat-def" id="def-tools">
+        <h3>Tools</h3>
+        <p>The functions the harness is willing to execute on the model's behalf: read a file, run a command, call an API. The registry of what exists, and the schemas for calling it.</p>
+        <p class="an-role"><strong>Architectural role:</strong> the agent's only means of affecting anything real, and therefore its entire blast radius. Covered in part one.</p>
+      </div>
+      <div class="anat-def" id="def-memory">
+        <h3>Memory</h3>
+        <p>Durable notes carried between runs &mdash; what was learned, what went wrong last time, what the user prefers. Stored outside the context window and retrieved by relevance when a new task starts.</p>
+        <p class="an-role"><strong>Architectural role:</strong> a retrieval store, not a context tier. Recall is a search problem: everything written must be worth re-reading, or memory becomes noise that crowds out the task.</p>
+      </div>
+      <div class="anat-def" id="def-policy">
+        <h3>Permission policy</h3>
+        <p>The rules that classify actions: allowed outright, allowed with a record, or requiring a human's approval before the harness will execute them.</p>
+        <p class="an-role"><strong>Architectural role:</strong> the boundary of autonomy, and the one component the model cannot argue with. It is enforced in the harness before execution, so a persuaded or mistaken model still cannot cross it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="semantic">
+  <h2>The semantic layer, and why it is layered</h2>
+  <p>An agent's knowledge is not one bag of text. It is tiered, and the tiers differ in exactly one respect that matters: <strong>when they get loaded into the context window, and when they leave.</strong></p>
+  <p>The reason is part one's cost fact. Every iteration re-sends the whole context window, and cost and latency scale with its size. A megabyte of documentation the agent <em>could</em> consult is free while it sits on disk and expensive the moment it is loaded &mdash; expensive on this call and on every call after it, because the context is append-only within a run. So the design question is never &ldquo;what might be useful?&rdquo; but &ldquo;what is worth paying for on every remaining model call of this run?&rdquo;</p>
+
+  <div class="card">
+    <div class="tiers">
+      <div class="tier" data-layer="identity">
+        <div class="t-head"><span class="t-name">Identity</span><span class="t-rule">always loaded</span></div>
+        <div class="t-body">Role, rules, refusals. Present from the first call to the last, never evicted. Keep it short: you pay for it every time.</div>
+      </div>
+      <div class="tier" data-layer="project">
+        <div class="t-head"><span class="t-name">Project knowledge</span><span class="t-rule">loaded once per run</span></div>
+        <div class="t-body">Conventions, architecture, domain vocabulary — true of this system regardless of task. Loaded at the start and kept, because nearly every step needs it.</div>
+      </div>
+      <div class="tier" data-layer="skill">
+        <div class="t-head"><span class="t-name">Skill instructions</span><span class="t-rule">loaded on match</span></div>
+        <div class="t-body">Read in only when a task matches the skill's declared trigger, and dropped when that work is finished. This is just-in-time loading, and it is what lets a library of hundreds of procedures cost nothing until one is needed.</div>
+      </div>
+      <div class="tier" data-layer="memory">
+        <div class="t-head"><span class="t-name">Recalled memory</span><span class="t-rule">retrieved by relevance</span></div>
+        <div class="t-body">Notes from earlier runs, fetched by search rather than loaded wholesale. A handful of lines, chosen because they match the task at hand.</div>
+      </div>
+      <div class="tier" data-layer="work">
+        <div class="t-head"><span class="t-name">Working transcript</span><span class="t-rule">grows, then compacts</span></div>
+        <div class="t-body">The plan, the tool calls and their results. The only tier that grows without bound, and therefore the first thing compacted: superseded output is replaced by a short summary of what it established.</div>
+      </div>
+    </div>
+    <p style="margin-top:18px"><strong>How these tiers map to the eight components.</strong> Three of the components <em>are</em> tiers: identity, the semantic layer (which supplies the project-knowledge tier) and skills. Memory is a tier's <em>source</em> rather than a tier itself — it lives outside the context window and only the handful of notes it returns are loaded. The remaining four never enter the context as knowledge at all: the model and the harness are the machinery that reads and assembles it, tools produce the working transcript by executing, and the permission policy is enforced in code before execution and is never something the model reads.</p>
+
+    <div class="callout">
+      <p><strong>The architect's version:</strong> this is a cache hierarchy. Identity is pinned; project knowledge is loaded on run start; skills are demand-paged on match; the working transcript is the evictable region. Compaction is eviction with a lossy summary in place of the discarded pages &mdash; and like any lossy cache, what it drops is a design decision you should make deliberately rather than discover in production.</p>
+    </div>
+  </div>
+</section>
+
+<section id="project-context">
+  <h2>Anatomy of a project-context file</h2>
+  <p>The semantic layer is files too. Where a skill packages a <em>procedure</em>, a project-context file packages <em>facts that stay true</em> — the things a newcomer would need told once and would then apply to every task.</p>
+  <div class="card">
+    <pre class="codeblock"><code>---
+name: payments-service
+scope: always            # loaded at the start of every run in this repo
+tokens: ~1500
+---
+
+- Money is integer minor units. Never floats, anywhere.
+- Every outbound call is idempotent; retries are safe by construction.
+- The webhook signer is the fragile part. Changes there need a smoke check.
+- Deploys are approval-gated in production, automatic in staging.</code></pre>
+    <p class="annot"><strong><code>scope</code> is the loading rule.</strong> <code>always</code> pins this file for the whole run; a file scoped to a path or a topic would instead be fetched only when the task touches it. That single field is the difference between a tier you pay for on every model call and one you pay for occasionally.</p>
+    <p class="annot"><strong>Relevance is decided before loading, not after.</strong> Note the third line: it is why the agent in the simulation recalled the webhook signer at all. Knowledge that never gets selected may as well not exist, so what earns a place in an always-loaded file is a real budget decision — every line here is charged against the <a href="#semantic">context budget</a> on every single call of every run.</p>
+  </div>
+</section>
+
+<section id="skills">
+  <h2>Anatomy of a skill</h2>
+  <p>A skill is a file. The top half is metadata that lets the harness decide <em>whether</em> to load it; the bottom half is instructions the model follows once it has been loaded. Nothing about it is magic &mdash; it is a procedure written down, with a trigger attached.</p>
+
+  <div class="card">
+    <pre class="codeblock"><code>---
+name: dependency-upgrade
+description: Upgrade a third-party package across a repo and verify it
+when_to_use: task mentions upgrading, bumping or migrating a dependency
+allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
+---
+
+1. Find every call site before changing anything.
+2. Read the target version's migration notes.
+3. Apply changes file by file; keep each edit reviewable.
+4. Run the full test suite. If it fails, diagnose before editing again.
+5. Never deploy without an explicit approval step.
+6. Smoke-check the health endpoint after deploying.</code></pre>
+    <p class="annot"><strong>The metadata is the load decision.</strong> <code>when_to_use</code> is matched against the incoming task; <code>allowed_tools</code> narrows what this procedure may reach for even if the agent has more tools available. Only if the match succeeds are the instructions read into the context window &mdash; the file's body costs nothing until then.</p>
+    <p class="annot"><strong>The instructions are ordinary prose.</strong> They are not code and they are not enforced: step 5 is a strong instruction to the model, not a guarantee. The guarantee lives in the permission policy, which stops the deployment whether or not the skill remembered to mention it. That distinction &mdash; instruction versus enforcement &mdash; is the one to hold on to.</p>
+  </div>
+</section>
+
+<section id="autonomy">
+  <h2>What &ldquo;autonomous&rdquo; actually claimed</h2>
+  <p>Twenty steps ran with nobody watching. That is the real claim, and it is worth stating precisely, because the word does a lot of unearned work in product copy.</p>
+  <p><strong>Autonomous means no human between iterations.</strong> The agent planned, loaded what it needed, edited, tested, failed a test, diagnosed the failure, fixed it and re-tested &mdash; without asking. The self-correction at steps 9&ndash;12 is the whole value proposition: a system that stops at the first failure needs a human per failure, which is not autonomy, it is a slower kind of supervision.</p>
+  <p><strong>Everything the tools returned was untrusted.</strong> At steps 9 and 10 the agent read a failing test's output and acted on it. That output is text the agent did not write, arriving through a tool result — the inbound half of the trust boundary from <a href="index.html#g-injection">part one</a>. A file, a web page or a build log can carry instructions, and an agent running unattended is precisely the case with nobody reading them first. This is why the permission gate has to be enforced in the harness: it is the one control that still holds when the model has been convinced by something it read.</p>
+  <p><strong>Autonomous does not mean unbounded.</strong> At step 14 the agent tried to deploy, and stopped &mdash; not because the model chose caution, and not because the skill file said to. It stopped because the permission policy classifies production deployment as approval-required, and the harness checks that classification before executing, every time. A model that had been talked into deploying, or that had simply misjudged, would have hit exactly the same wall.</p>
+  <p><strong>What happens when the answer is no.</strong> A denial is not an exception either — it comes back as a result, exactly like a failed test. The agent reads it, and either adapts (deploy to staging instead, open a change request, describe what it would have done) or stops and reports that it cannot finish. Suspension is real suspension: the loop is not running and no tokens are being spent while it waits, so a gate can sit unanswered for a day without costing anything. What it does mean is that the run now has a human in its critical path, which is exactly the trade you chose when you classified the action.</p>
+  <p><strong>Two ceilings you also have to set.</strong> The self-correction loop that fixed the failing test is the same machinery that will retry a hopeless command forever, so the harness imposes an iteration ceiling and a token or cost budget for the run. Neither is a safety feature in the permission sense; both are there because an agent that cannot succeed does not necessarily notice.</p>
+  <p><strong>When the context fills anyway.</strong> Compaction buys room, but it is lossy and it only buys so much. The standard next answer is delegation: hand a well-scoped sub-task to a fresh agent with its own context window, and take back only the result. That keeps the parent's context small at the cost of the sub-agent seeing less. It is a large topic and this page does not cover it further — the point here is only that it is the usual response to context pressure, not an exotic one.</p>
+
+  <div class="callout">
+    <p>That is the line to hold when someone asks how much autonomy to grant: you are not tuning how much you trust the model's judgement. You are choosing which actions the harness will execute without asking &mdash; a policy decision, written in your code, enforced regardless of what the model says.</p>
+  </div>
+</section>
+
+<section id="glossary">
+  <h2>Glossary &mdash; the additions</h2>
+  <p>Part one's glossary covers token, context window, system prompt, tool call, agentic loop, sandbox and the rest. These are the terms this page adds.</p>
+  <div class="card">
+    <dl class="gloss">
+      <dt id="g-agent">Agent</dt><dd>A harness and model, plus the identity, semantic layer, skills, tools, memory and permission policy that let it pursue a multi-step task rather than answer a single question.</dd>
+      <dt id="g-identity">Identity</dt><dd>The always-resident instructions defining an agent's role, tone and hard rules. Implemented as a system prompt; distinguished by the fact that it is never evicted.</dd>
+      <dt id="g-semantic">Semantic layer</dt><dd>The agent's structured knowledge of a specific domain or codebase, organised into tiers that differ in when they are loaded into context and when they are dropped.</dd>
+      <dt id="g-skill">Skill</dt><dd>A named, packaged procedure: metadata declaring when it applies, plus instructions for carrying it out. Loaded into context only when a task matches its trigger.</dd>
+      <dt id="g-jit">Just-in-time loading</dt><dd>Reading knowledge into the context window at the moment it becomes relevant instead of up front, so unused knowledge costs nothing.</dd>
+      <dt id="g-memory">Memory</dt><dd>Durable notes kept outside the context window between runs and retrieved by relevance at the start of a new task.</dd>
+      <dt id="g-compaction2">Compaction</dt><dd>Replacing superseded parts of the working transcript with a shorter summary so the context window stops growing. Lossy by definition.</dd>
+      <dt id="g-budget">Context budget</dt><dd>The share of the context window a run can afford to spend on each tier of knowledge, given that everything loaded is re-sent on every model call. The constraint that makes tiering necessary in the first place.</dd>
+      <dt id="g-policy">Permission policy</dt><dd>Rules classifying actions as allowed, allowed-with-record, or approval-required, enforced by the harness before execution. The boundary of an agent's autonomy.</dd>
+      <dt id="g-gate">Permission gate</dt><dd>The point where the policy suspends the loop and waits for a human decision before a classified action may run.</dd>
+      <dt id="g-selfcorrect">Self-correction</dt><dd>Feeding a failure — a failed test, an error result — back into context as input, so the agent diagnoses and retries instead of halting.</dd>
+    </dl>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <p>Part 2 of 2. <a href="index.html">Back to part 1: How AI Harnesses Work</a></p>
+  <p>A single self-contained HTML file — no frameworks, no network, no real model behind it. The run is scripted; view source to see how.</p>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- Context blocks, tagged by knowledge layer ---------- */
+  var BLOCKS = {
+    identity:{layer:"identity", label:"Agent identity",       detail:"role, hard rules, refusals",              tokens:900},
+    task:    {layer:"work",     label:"User task",            detail:"“upgrade the payments SDK to v3”", tokens:18},
+    proj:    {layer:"project",  label:"Project knowledge",    detail:"repo conventions, architecture notes",    tokens:1500},
+    mem:     {layer:"memory",   label:"Recalled memory",      detail:"last upgrade broke the webhook signer",   tokens:140},
+    plan:    {layer:"work",     label:"Plan",                 detail:"6 steps, drafted by the model",           tokens:120},
+    skill:   {layer:"skill",    label:"Skill: dependency-upgrade", detail:"5 instructions + allowed tools",     tokens:800},
+    read1:   {layer:"work",     label:"Tool result: survey",  detail:"23 call sites across 9 files",            tokens:900},
+    edit1:   {layer:"work",     label:"Tool result: edits",   detail:"9 files changed",                         tokens:400},
+    test1:   {layer:"work",     label:"Tool result: tests FAILED", detail:"1 failing — webhook signature", tokens:700},
+    diag:    {layer:"work",     label:"Diagnosis",            detail:"v3 renamed the signing header",           tokens:150},
+    fix1:    {layer:"work",     label:"Tool result: fix",     detail:"1 file changed",                          tokens:200},
+    test2:   {layer:"work",     label:"Tool result: tests PASSED", detail:"142 passed",                         tokens:300},
+    summary: {layer:"work",     label:"Compacted summary",    detail:"replaces 4 superseded results",           tokens:220},
+    gate:    {layer:"work",     label:"Permission request",   detail:"deploy to production — awaiting approval", tokens:60},
+    approve: {layer:"work",     label:"Approval granted",     detail:"recorded, with who and when",             tokens:20},
+    deploy:  {layer:"work",     label:"Tool result: deployed",detail:"release v3.0.1",                          tokens:180},
+    smoke:   {layer:"work",     label:"Tool result: smoke ok",detail:"payments endpoint healthy",               tokens:160},
+    report:  {layer:"work",     label:"Report",               detail:"what changed, and why it first failed",   tokens:200}
+  };
+  var BUDGET = 8000;
+
+  /* ---------- Stages. add/drop are cumulative; drop is what makes
+       compaction and skill-unloading visible in the panel. ---------- */
+  var STAGES = [
+    {label:"Ready", comps:[], add:[], drop:[],
+     caption:"Press <strong>Play</strong> to watch the whole task run, or <strong>Step</strong> to move through it at your own pace."},
+
+    {label:"Step 1 · The command", comps:["harness","identity"], move:{from:"identity",to:"harness",text:"identity"}, add:["identity","task"],
+     caption:"You type one instruction and walk away. The harness starts a run and loads the agent’s <strong>identity</strong> — role, hard rules, refusals. This block is always resident: it is in the first model call and every one after it."},
+
+    {label:"Step 2 · Consulting project knowledge", comps:["semantic","harness"], move:{from:"semantic",to:"harness",text:"project docs"}, add:["proj"],
+     caption:"Before planning anything, the agent loads durable <strong>project knowledge</strong>: repository conventions and architecture notes, true of this codebase whatever the task. Loaded once, kept for the whole run."},
+
+    {label:"Step 3 · Recalling memory", comps:["memory","harness"], move:{from:"memory",to:"harness",text:"recalled note"}, add:["mem"],
+     caption:"The agent searches its <strong>memory</strong> for anything relevant and finds one note from a previous run: last time this SDK was upgraded, the webhook signer broke. Retrieved by relevance — not loaded wholesale."},
+
+    {label:"Step 4 · The plan", comps:["model","harness"], move:{from:"harness",to:"model",text:"context"}, add:["plan"],
+     caption:"First model call. With identity, project knowledge and memory in context, the model drafts a six-step plan. Nothing has been executed yet — a plan is just more text."},
+
+    {label:"Step 5 · Skill match", comps:["skills","harness"], move:{from:"harness",to:"skills",text:"match?"}, add:[],
+     caption:"The harness checks its skill library against the task. Each skill declares when it applies; <code>dependency-upgrade</code> says “task mentions upgrading, bumping or migrating a dependency”. That matches — but nothing has been loaded yet."},
+
+    {label:"Step 6 · Skill loaded", comps:["skills","harness"], move:{from:"skills",to:"harness",text:"skill loaded"}, add:["skill"],
+     caption:"<strong>Now</strong> the skill’s instructions are read into context — just-in-time. Every other skill in the library stays on disk costing nothing. Watch the panel: a new violet block, and the budget moves."},
+
+    {label:"Step 7 · Survey before changing", comps:["tools","harness"], move:{from:"harness",to:"tools",text:"survey"}, add:["read1"],
+     caption:"The skill’s first instruction is to find every call site before editing. The harness runs the search: 23 call sites across 9 files. That result is now the largest thing in the context."},
+
+    {label:"Step 8 · Apply the upgrade", comps:["tools","model"], move:{from:"harness",to:"tools",text:"apply edits"}, add:["edit1"],
+     caption:"The model requests an edit per file; the harness executes each one. Exactly the loop from part one — the model asks, the harness acts — just running many times without you."},
+
+    {label:"Step 9 · Verify — and it fails", comps:["tools","harness"], move:{from:"tools",to:"harness",text:"tests FAILED"}, add:["test1"],
+     caption:"The skill says verify after editing. The suite runs and one test fails: the webhook signature check. This is the moment that decides whether an unattended agent is useful or dangerous."},
+
+    {label:"Step 10 · Self-correction: diagnose", comps:["model"], move:{from:"harness",to:"model",text:"diagnose"}, add:["diag"],
+     caption:"Nobody is asked. The failure output is now just context — and so is that recalled memory from step 3. The model connects them: v3 renamed the signing header."},
+
+    {label:"Step 11 · Self-correction: fix", comps:["tools","model"], move:{from:"harness",to:"tools",text:"apply fix"}, add:["fix1"],
+     caption:"One targeted edit. Failure became input rather than a stop — the same execute-and-verify cycle running again with more information than it had the first time."},
+
+    {label:"Step 12 · Verify — green", comps:["tools"], move:{from:"tools",to:"harness",text:"tests passed"}, add:["test2"],
+     caption:"142 tests pass. The sub-task’s exit condition is met and the agent moves to the next step of its plan. The context is now at its fullest point in the run."},
+
+    {label:"Step 13 · Compaction", comps:["harness"], add:["summary"], drop:["read1","edit1","test1","fix1"],
+     caption:"Four large tool results have been superseded by the passing test run. The harness <strong>compacts</strong>: they are replaced by one short summary of what they established. This is the only step where the context gets <em>smaller</em> — watch the panel and the budget bar."},
+
+    {label:"Step 14 · Permission gate", comps:["policy","harness"], move:{from:"harness",to:"policy",text:"deploy?"}, add:["gate"], gate:true,
+     caption:"The next plan step is deploying to production. The <strong>permission policy</strong> classifies that as approval-required, so the harness suspends the loop and asks. The model did not choose to pause, and cannot overrule the pause — the check runs in the harness, before execution."},
+
+    {label:"Step 15 · Approval", comps:["policy","harness"], move:{from:"policy",to:"harness",text:"approved"}, add:["approve"], gate:true,
+     caption:"You approve, and the decision is recorded with it. This is the honest boundary of “autonomous”: the loop ran without a human between iterations, right up to the line the policy drew."},
+
+    {label:"Step 16 · Deploy", comps:["tools","harness"], move:{from:"harness",to:"tools",text:"deploy"}, add:["deploy"],
+     caption:"With approval on record the harness executes the deployment. Release v3.0.1 goes out."},
+
+    {label:"Step 17 · Final verify", comps:["tools"], move:{from:"harness",to:"tools",text:"smoke check"}, add:["smoke"],
+     caption:"The skill’s last instruction: confirm the change is healthy where it actually runs. A smoke check against the payments endpoint comes back clean."},
+
+    {label:"Step 18 · Report", comps:["model"], move:{from:"model",to:"harness",text:"report"}, add:["report"],
+     caption:"The agent writes up what changed, why the first attempt failed and what it did about it. This is the audit trail for work nobody watched — the deliverable, as much as the deploy."},
+
+    {label:"Step 19 · Memory write", comps:["memory","harness"], move:{from:"harness",to:"memory",text:"write note"}, add:[], memWrite:true,
+     caption:"One durable note goes to <strong>memory</strong>: v3 renamed the signing header. The next run recalls it at step 3 and does not repeat the mistake."},
+
+    {label:"Step 20 · Release the layers", comps:["harness"], add:[], drop:["skill"],
+     caption:"The task is finished, so the skill’s instructions are dropped from context. Identity stays. Project knowledge stays. Memory persists outside the context entirely. The tiers behaved like a cache: pinned, demand-paged, evictable."},
+
+    {label:"Done", comps:[], add:[], drop:[],
+     caption:"One command. Twenty steps. One mistake corrected without you, and exactly one interruption — the one the policy required. That is what “autonomous, bounded by policy” means. Press <strong>Reset</strong> to run it again."}
+  ];
+  var LAST = STAGES.length - 1;
+  var STEP_COUNT = LAST - 1;
+  var DONE_CAPTION = "The run is complete — press <strong>Reset</strong> (or Play) to watch it again.";
+
+  var $ = function(id){ return document.getElementById(id); };
+  var els = {
+    sim: document.querySelector(".sim"),
+    diagram: $("diagram"), wires: $("wires"), packet: $("packet"),
+    caption: $("caption"), stageLabel: $("stage-label"),
+    play: $("btn-play"), step: $("btn-step"), back: $("btn-back"),
+    reset: $("btn-reset"), speed: $("speed"),
+    playIcon: $("btn-play").querySelector(".btn-icon"),
+    playWord: $("btn-play").querySelector(".btn-word"),
+    progressText: $("progress-text"), progressFill: $("progress-fill"),
+    stack: $("ctx-stack"), tokenCount: $("token-count"), tokenFill: $("token-fill"),
+    memFlash: $("mem-flash"),
+    tokenNote: $("token-note"), ctxSummary: $("ctx-summary"),
+    walkthrough: $("walkthrough-list")
+  };
+  var actors = {};
+  Array.prototype.forEach.call(els.diagram.querySelectorAll(".actor"), function(a){
+    actors[a.getAttribute("data-comp")] = a;
+  });
+
+  var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = motion.matches;
+  if (motion.addEventListener){
+    motion.addEventListener("change", function(e){ reduced = e.matches; });
+  }
+
+  /* ---------- diagram wiring (same approach as page 1) ---------- */
+  // Knowledge sources feed the harness; the harness reaches model, tools, policy.
+  var WIRES = [
+    ["identity","harness"], ["semantic","harness"], ["skills","harness"], ["memory","harness"],
+    ["harness","model"], ["harness","tools"], ["harness","policy"]
+  ];
+  function centre(id){
+    var el = actors[id];
+    return { x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 };
+  }
+  function drawWires(){
+    var svg = els.wires;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    WIRES.forEach(function(pair){
+      var a = centre(pair[0]), b = centre(pair[1]);
+      var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+      line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+      svg.appendChild(line);
+    });
+  }
+  // Travel between box EDGES, not centres: landing on a centre covers the label
+  // it is meant to point at. Finds where the wire crosses the target's box and
+  // backs off a little, so the pill arrives beside the component like page 1's.
+  function approach(fromId, toId){
+    var a = centre(fromId), b = centre(toId), el = actors[toId];
+    var hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
+    var dx = a.x - b.x, dy = a.y - b.y;
+    if (!dx && !dy) return b;
+    var t = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
+    var len = Math.sqrt(dx * dx + dy * dy);
+    var f = t + Math.min(18, len * 0.14) / len;
+    return { x: b.x + dx * f, y: b.y + dy * f };
+  }
+
+  // Rest halfway along the visible wire — the gap between the two boxes. Landing
+  // on the target itself would cover the very label the pill points at.
+  function restPoint(move){
+    var a = approach(move.to, move.from);     // source edge, facing the target
+    var b = approach(move.from, move.to);     // target edge, facing the source
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function placePacket(pt){
+    // Clamp so a long label can never hang past the diagram and widen the page.
+    var half = els.packet.offsetWidth / 2, box = els.diagram.clientWidth, x = pt.x;
+    if (box > els.packet.offsetWidth) x = Math.min(Math.max(x, half), box - half);
+    els.packet.style.transform = "translate(" + x + "px," + pt.y + "px) translate(-50%,-50%)";
+  }
+  var flightUntil = 0, flightTimer = null;
+  function flyPacket(move, animate){
+    var pk = els.packet;
+    pk.textContent = move.text;
+    pk.classList.add("visible");
+    pk.style.transition = "none";
+    placePacket(centre(move.from));                 // sets off from the source
+    if (!animate || reduced){ flightUntil = 0; placePacket(restPoint(move)); return; }
+    void pk.offsetWidth;                       // commit the start position
+    var dur = Math.round(700 / speed());
+    flightUntil = (window.performance && performance.now ? performance.now() : 0) + dur;
+    clearTimeout(flightTimer);
+    flightTimer = setTimeout(function(){ flightUntil = 0; }, dur);
+    pk.style.transition = "transform " + dur + "ms ease-in-out";
+    placePacket(restPoint(move));                   // comes to rest on the wire
+  }
+  function hidePacket(){
+    els.packet.classList.remove("visible");
+    els.packet.style.transition = "none";
+  }
+  function refreshDiagram(){
+    drawWires();
+    var st = STAGES[current];
+    if (!st || !st.move) return;
+    var now = (window.performance && performance.now ? performance.now() : 0);
+    if (flightUntil > now){
+      // Mid-flight: re-issue the remainder against the new geometry instead of
+      // snapping, so a resize during autoplay does not look like a glitch.
+      els.packet.style.transition = "transform " + Math.round(flightUntil - now) + "ms ease-in-out";
+    } else {
+      els.packet.style.transition = "none";
+    }
+    placePacket(restPoint(st.move));
+  }
+  window.addEventListener("resize", refreshDiagram);
+  if (window.ResizeObserver){
+    new ResizeObserver(refreshDiagram).observe(els.diagram);
+  }
+
+  /* ---------- derived state ---------- */
+  function blocksThrough(i){
+    var list = [];
+    for (var s = 0; s <= i; s++){
+      (STAGES[s].add || []).forEach(function(id){
+        if (list.indexOf(id) === -1) list.push(id);
+      });
+      (STAGES[s].drop || []).forEach(function(id){
+        var k = list.indexOf(id);
+        if (k !== -1) list.splice(k, 1);
+      });
+    }
+    return list;
+  }
+  function tokensOf(ids){
+    return ids.reduce(function(sum, id){ return sum + BLOCKS[id].tokens; }, 0);
+  }
+
+  var current = 0, timer = null, rendered = [];
+
+  function speed(){ return parseFloat(els.speed.value) || 1; }
+
+  function makeBlock(id){
+    var b = BLOCKS[id];
+    var d = document.createElement("div");
+    d.className = "ctx-block";
+    d.setAttribute("data-layer", b.layer);
+    d.setAttribute("data-id", id);
+    d.innerHTML = "<span class='bt'></span><div class='bl'></div><div class='bd'></div>";
+    d.querySelector(".bt").textContent = "≈" + b.tokens.toLocaleString() + " tok";
+    d.querySelector(".bl").textContent = b.label;
+    d.querySelector(".bd").textContent = b.detail;
+    return d;
+  }
+
+  // Rebuild the panel to match the target list. Additions animate in; removals
+  // are immediate, which is what makes compaction read as a deletion.
+  function renderStack(ids, animate){
+    var have = {}, i;
+    // Blocks already collapsing are not reusable and are not part of the state.
+    Array.prototype.forEach.call(els.stack.querySelectorAll(".ctx-block"), function(el){
+      if (el.classList.contains("leaving")){
+        if (el.parentNode) el.parentNode.removeChild(el);
+      } else {
+        have[el.getAttribute("data-id")] = el;
+      }
+    });
+    Object.keys(have).forEach(function(id){
+      if (ids.indexOf(id) !== -1) return;
+      var el = have[id];
+      if (animate && !reduced){
+        el.classList.add("leaving");          // collapse, then drop from the DOM
+        setTimeout(function(){ if (el.parentNode) el.parentNode.removeChild(el); }, 340);
+      } else if (el.parentNode){
+        el.parentNode.removeChild(el);
+      }
+    });
+    // Only INSERT new blocks. Re-appending survivors would shuffle them past the
+    // blocks that are still collapsing, so a merge would read as a reshuffle.
+    var fresh = [];
+    for (i = 0; i < ids.length; i++){
+      if (have[ids[i]]) continue;
+      var el = makeBlock(ids[i]);
+      fresh.push(el);
+      var after = null;
+      for (var k = i + 1; k < ids.length; k++){
+        if (have[ids[k]]){ after = have[ids[k]]; break; }
+      }
+      els.stack.insertBefore(el, after);    // null anchor appends
+      have[ids[i]] = el;
+    }
+    if (fresh.length && animate && !reduced){
+      fresh.forEach(function(el){ el.classList.add("enter"); });
+      requestAnimationFrame(function(){
+        fresh.forEach(function(el){ el.classList.remove("enter"); });
+      });
+    }
+    rendered = ids.slice();
+  }
+
+  function applyStage(i, animate){
+    current = i;
+    var st = STAGES[i];
+
+    Object.keys(actors).forEach(function(c){
+      actors[c].classList.toggle("on", st.comps.indexOf(c) !== -1);
+    });
+    if (st.move) flyPacket(st.move, animate);
+    else hidePacket();
+
+    els.stageLabel.textContent = st.label;
+    els.caption.innerHTML = st.caption +
+      (st.gate ? "<span class='gate-flag'>Policy stop — not a model decision</span>" : "");
+
+    var ids = blocksThrough(i);
+    renderStack(ids, animate);
+
+    var total = tokensOf(ids);
+    var pct = Math.min(100, (total / BUDGET) * 100);     // one value for bar and text
+    els.tokenCount.textContent = total.toLocaleString() + " tokens";
+    els.tokenFill.style.width = pct + "%";
+    els.tokenNote.textContent = "of a " + BUDGET.toLocaleString() +
+      "-token budget for this run (" + Math.round(pct) + "% used)";
+
+    // The note is written to a store outside the window, so it is shown beside
+    // the panel and charged nothing.
+    var wrote = false;
+    for (var w = 0; w <= i; w++){ if (STAGES[w].memWrite) wrote = true; }
+    els.memFlash.hidden = !wrote;
+
+    var summary = ids.length + (ids.length === 1 ? " block, " : " blocks, ") +
+                  total.toLocaleString() + " tokens";
+    if (els.ctxSummary.textContent !== summary) els.ctxSummary.textContent = summary;
+
+    els.progressText.textContent = i === 0 ? "Step 0 of " + STEP_COUNT :
+      (i === LAST ? "Complete" : "Step " + i + " of " + STEP_COUNT);
+    els.progressFill.style.width = (i / LAST * 100) + "%";
+
+    if (i === 0 && document.activeElement === els.back) els.step.focus();
+    els.back.disabled = (i === 0);
+
+    if (i === LAST) stopPlay();
+  }
+
+  /* ---------- controls ---------- */
+  function stepOnce(){
+    if (current >= LAST){ els.caption.innerHTML = DONE_CAPTION; return; }
+    applyStage(current + 1, true);
+  }
+  // Backward always takes the instant path: every visible property is derived
+  // from the stage index, so there is nothing to replay — and a reversed packet
+  // flight would imply data moving the wrong way.
+  function stepBack(){
+    if (current <= 0) return;
+    applyStage(current - 1, false);
+  }
+  function startPlay(){
+    if (current >= LAST) applyStage(0, false);
+    els.playIcon.textContent = "❚❚";
+    els.playWord.textContent = "Pause";
+    stepOnce();
+    if (current >= LAST){ stopPlay(); return; }
+    schedule();
+  }
+  function schedule(){
+    clearInterval(timer);
+    timer = setInterval(function(){
+      stepOnce();
+      if (current >= LAST) stopPlay();
+    }, 2400 / speed());
+  }
+  function stopPlay(){
+    clearInterval(timer); timer = null;
+    els.playIcon.textContent = "▶";
+    els.playWord.textContent = "Play";
+  }
+  function togglePlay(){ timer ? stopPlay() : startPlay(); }
+  function reset(){ stopPlay(); applyStage(0, false); }
+
+  els.play.addEventListener("click", togglePlay);
+  els.step.addEventListener("click", function(){ stopPlay(); stepOnce(); });
+  els.back.addEventListener("click", function(){ stopPlay(); stepBack(); });
+  els.reset.addEventListener("click", reset);
+  els.speed.addEventListener("change", function(){ if (timer) schedule(); });
+
+  function simInView(){
+    var r = els.sim.getBoundingClientRect();
+    var h = window.innerHeight || document.documentElement.clientHeight;
+    return r.bottom > 0 && r.top < h;
+  }
+  document.addEventListener("keydown", function(e){
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var tag = e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+    if (!simInView()) return;
+    if (e.key === "ArrowRight"){
+      if (current >= LAST) return;              // no-op: leave the key alone
+      e.preventDefault(); stopPlay(); stepOnce();
+    }
+    else if (e.key === "ArrowLeft"){
+      if (current <= 0) return;
+      e.preventDefault(); stopPlay(); stepBack();
+    }
+    else if (e.key === " "){ if (tag === "BUTTON") return; e.preventDefault(); togglePlay(); }
+    else if (e.key === "r" || e.key === "R"){ reset(); }
+  });
+
+  /* ---------- static walkthrough, built from the same STAGES ---------- */
+  STAGES.forEach(function(st, i){
+    if (i === 0 || i === LAST) return;
+    var li = document.createElement("li");
+    li.id = "walk-" + i;
+    var label = document.createElement("div");
+    label.className = "wl";
+    label.textContent = st.label.replace(/^Step \d+ · /, "");
+    var body = document.createElement("div");
+    body.className = "wc";
+    body.innerHTML = st.caption +
+      (st.gate ? "<span class='gate-flag'>Policy stop — not a model decision</span>" : "");
+    li.appendChild(label); li.appendChild(body);
+    els.walkthrough.appendChild(li);
+  });
+
+  /* ---------- caption height lock (same approach as page 1) ---------- */
+  var lastPinned = null;
+  function sizeCaptionBox(){
+    var box = document.querySelector(".caption-box");
+    if (!box) return;
+    var width = box.getBoundingClientRect().width;
+    if (!width) return;
+    var probe = box.cloneNode(true);
+    Array.prototype.forEach.call(probe.querySelectorAll("[id]"), function(e){ e.removeAttribute("id"); });
+    probe.removeAttribute("aria-live"); probe.removeAttribute("aria-atomic");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;" +
+                          "pointer-events:none;min-height:0;width:" + width + "px";
+    var pLabel = probe.querySelector(".stage-label"), pText = probe.querySelector("p");
+    if (!pLabel || !pText) return;
+    var max = 0;
+    try {
+      box.parentNode.appendChild(probe);
+      STAGES.forEach(function(st){
+        pLabel.textContent = st.label;
+        pText.innerHTML = st.caption +
+          (st.gate ? "<span class='gate-flag'>Policy stop — not a model decision</span>" : "");
+        var h = probe.getBoundingClientRect().height;
+        if (h > max) max = h;
+      });
+      pLabel.textContent = STAGES[LAST].label;
+      pText.innerHTML = DONE_CAPTION;
+      if (probe.getBoundingClientRect().height > max) max = probe.getBoundingClientRect().height;
+    } finally {
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
+    }
+    var pinned = Math.ceil(max);
+    if (pinned !== lastPinned){ lastPinned = pinned; box.style.minHeight = pinned + "px"; }
+  }
+  var capTimer = null;
+  function scheduleCaptionSizing(){
+    clearTimeout(capTimer);
+    capTimer = setTimeout(sizeCaptionBox, 120);
+  }
+  window.addEventListener("resize", scheduleCaptionSizing);
+  if (window.ResizeObserver){
+    var ro = new ResizeObserver(scheduleCaptionSizing);
+    var wrap = document.querySelector(".stage-wrap");
+    if (wrap) ro.observe(wrap);
+  }
+
+  sizeCaptionBox();
+  drawWires();
+  applyStage(0, false);
+})();
+</script>
+
+<script>
+/* Agent-anatomy diagram: select a component to read its definition.
+   Progressive enhancement, page-1 style — the markup ships as plain divs with
+   every definition visible, and this script is what turns them into controls.
+   With JS off there are no button semantics and no affordances at all. */
+(function(){
+  "use strict";
+  var section = document.getElementById("anatomy");
+  var wrap  = document.querySelector(".anat");
+  var grid  = document.getElementById("anat-grid");
+  var defs  = document.getElementById("anat-defs");
+  var hint  = document.getElementById("anat-hint");
+  if (!section || !wrap || !grid || !defs) return;
+
+  var nodes = Array.prototype.slice.call(grid.querySelectorAll(".anat-node"));
+  var panels = {};
+  Array.prototype.forEach.call(defs.querySelectorAll(".anat-def"), function(d){
+    panels[d.id] = d;
+  });
+  if (!nodes.length) return;
+
+  function select(comp){
+    var chosen = null;
+    nodes.forEach(function(n){
+      var on = n.getAttribute("data-comp") === comp;
+      // aria-expanded, not aria-pressed: this is a disclosure, not a toggle.
+      n.setAttribute("aria-expanded", on ? "true" : "false");
+      if (on) chosen = n;
+    });
+    Object.keys(panels).forEach(function(id){ panels[id].classList.remove("is-open"); });
+    if (chosen){
+      var panel = panels[chosen.getAttribute("aria-controls")];
+      if (panel) panel.classList.add("is-open");
+      wrap.classList.add("picked");
+      if (hint) hint.style.display = "none";
+    } else {
+      wrap.classList.remove("picked");
+      if (hint) hint.style.display = "";
+    }
+  }
+
+  nodes.forEach(function(n){
+    var comp = n.getAttribute("data-comp");
+    n.setAttribute("role", "button");
+    n.setAttribute("tabindex", "0");
+    n.setAttribute("aria-controls", "def-" + comp);
+    n.setAttribute("aria-expanded", "false");
+    function toggle(){ select(n.getAttribute("aria-expanded") === "true" ? null : comp); }
+    n.addEventListener("click", toggle);
+    n.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); }
+      else if (e.key === "Escape"){ select(null); n.focus(); }
+    });
+  });
+
+  // Escape anywhere in the section clears the selection.
+  section.addEventListener("keydown", function(e){
+    if (e.key === "Escape") select(null);
+  });
+
+  // The simulation binds Space / R / arrows on `document`. Stop them at this
+  // section's boundary so typing here never drives the player — the same
+  // boundary page 1 puts around its deep dive. stopPropagation only.
+  var SIM_KEYS = { " ": 1, "r": 1, "R": 1, "ArrowRight": 1, "ArrowLeft": 1 };
+  section.addEventListener("keydown", function(e){
+    if (SIM_KEYS[e.key] === 1) e.stopPropagation();
+  });
+
+  wrap.classList.add("js");
+  select(null);
+})();
+</script>
+</body>
+</html>

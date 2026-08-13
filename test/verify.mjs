@@ -5,15 +5,19 @@
 //
 // All paths are derived from this file's own location, so the suite runs from
 // any checkout without editing.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 const PORT = process.env.CDP_PORT || 9222;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
-const FILE = pathToFileURL(join(REPO, 'index.html')).href;
+const FILE  = pathToFileURL(join(REPO, 'index.html')).href;
+const FILE2 = pathToFileURL(join(REPO, 'agent.html')).href;   // page 2
 const OUT  = join(HERE, 'artifacts');
+// Derived from the page source so data-driven counts cannot be hardcoded stale.
+const AGENT_SRC = readFileSync(join(REPO, 'agent.html'), 'utf8');
+const MOVE_STAGES = (AGENT_SRC.match(/move:\{from/g) || []).length;
 mkdirSync(OUT, { recursive: true });
 
 const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
@@ -69,14 +73,18 @@ const errs = () => events.filter(e =>
 const errText = () => JSON.stringify(errs().map(e =>
   e.params?.entry?.text || e.params?.exceptionDetails?.text || e.params?.args?.[0]?.value)).slice(0, 500);
 
-async function load(width, height, media = []) {
+// One loader for both pages; `page` picks the file.
+async function loadPage(page, width, height, media = []) {
   events = [];
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setEmulatedMedia', { features: media });
-  await send('Page.navigate', { url: FILE });
+  await send('Page.navigate', { url: page === 2 ? FILE2 : FILE });
   await sleep(1100);
-  try { await send('Page.bringToFront'); } catch (e) { /* focus tests will show it */ }
+  // Focus events do not fire in headless Chrome unless the page is frontmost.
+  try { await send('Page.bringToFront'); } catch (e) { /* focus checks will show it */ }
 }
+const load  = (w, h, m = []) => loadPage(1, w, h, m);
+const load2 = (w, h, m = []) => loadPage(2, w, h, m);
 
 // ══════════════════════════════════════════ AC1: clean load, no network
 console.log('\n── Acceptance: loads from file:// with zero errors and zero network requests');
@@ -177,6 +185,81 @@ check('Reset returns to stage 0, empties the stack and zeroes the meter', await 
   [...document.querySelectorAll('#ctx-stack .ctx-block')].every(b => b.hidden)`));
 
 // ══════════════════════════════════════════ Matrix: autoplay
+
+console.log('\n── Back-step (page 1)');
+await load(1280, 950);
+check('BACK P1 the Back button exists, is disabled at stage 0, and names itself', await ev(`(() => {
+  const b = document.getElementById('btn-back');
+  return !!b && b.disabled === true && !b.hasAttribute('aria-label')
+      && b.querySelector('.btn-word').textContent === 'Back'
+      && b.querySelector('.btn-icon').getAttribute('aria-hidden') === 'true';
+})()`));
+check('BACK P1 back from a block-adding stage removes the block and the tokens', await ev(`(() => {
+  const live = () => [...document.querySelectorAll('#ctx-stack .ctx-block')].filter(b => !b.hidden).length;
+  const tok  = () => +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();   // stage 5
+  const at5 = [live(), tok()];
+  document.getElementById('btn-back').click();                               // -> stage 4
+  const at4 = [live(), tok()];
+  document.getElementById('btn-back').click();                               // -> stage 3
+  const at3 = [live(), tok()];
+  return at5[0] === 4 && at5[1] === 3652 && at4[0] === 3 && at4[1] === 3612
+      && at3[0] === 3 && at3[1] === 3612
+      && document.getElementById('progress-text').textContent === 'Step 3 of 14';
+})()`));
+check('BACK P1 back all the way returns to stage 0 and then no-ops', await ev(`(() => {
+  for (let i = 0; i < 12; i++) document.getElementById('btn-back').click();
+  const at0 = document.getElementById('progress-text').textContent;
+  document.getElementById('btn-back').click();                               // no-op
+  return at0 === 'Step 0 of 14' &&
+    document.getElementById('progress-text').textContent === 'Step 0 of 14' &&
+    document.getElementById('btn-back').disabled === true &&
+    [...document.querySelectorAll('#ctx-stack .ctx-block')].every(b => b.hidden) &&
+    document.getElementById('token-count').textContent === '0 tokens';
+})()`));
+check('BACK P1 the caption and stage label follow a backward step', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 6; i++) document.getElementById('btn-step').click();
+  const fwd = document.getElementById('stage-label').textContent;
+  document.getElementById('btn-back').click();
+  const back = document.getElementById('stage-label').textContent;
+  return fwd !== back && /Step 5/.test(back) &&
+    document.getElementById('caption').textContent.length > 60;
+})()`));
+check('BACK P1 Back halts autoplay, as Step does', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  document.getElementById('btn-play').click();
+  const playing = /Pause/.test(document.getElementById('btn-play').textContent);
+  document.getElementById('btn-back').click();
+  return playing && /Play/.test(document.getElementById('btn-play').textContent);
+})()`));
+await ev(`document.getElementById('btn-reset').click();
+          for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
+          document.activeElement.blur(); window.scrollTo({top:0, behavior:'instant'});`);
+await key('ArrowLeft', 'ArrowLeft', 37); await sleep(120);
+check('BACK P1 ArrowLeft steps back, mirroring ArrowRight',
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 3 of 14');
+await key('ArrowRight', 'ArrowRight', 39); await sleep(120);
+check('BACK P1 the keyboard hint advertises the back shortcut', await ev(`(() => {
+  const t = document.querySelector('.kbd-hint').textContent;
+  return /back/i.test(t) && t.includes('←') && t.includes('→');
+})()`));
+check('BACK P1 ArrowRight still steps forward',
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 4 of 14');
+check('BACK P1 the deep-dive boundary still swallows ArrowLeft (it is not the sim)', await ev(`(() => {
+  const before = document.getElementById('progress-text').textContent;
+  const line = document.querySelector('#pseudo .pl[data-sub]');
+  line.focus();
+  line.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true, cancelable:true}));
+  const unchanged = document.getElementById('progress-text').textContent === before;
+  // Hand the page back the way we found it: focusing a line scrolls the deep
+  // dive into view, which would gate the sim shortcuts for later checks.
+  line.blur();
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  return unchanged;
+})()`));
+
 console.log('\n── Matrix: Autoplay');
 await ev(`document.getElementById('speed').value='1.8';
           document.getElementById('speed').dispatchEvent(new Event('change'));
@@ -561,7 +644,7 @@ check('P12 Pause state also matches its visible word', await ev(`(() => {
 check('P12 button glyphs are hidden from assistive tech', await ev(`
   [...document.querySelectorAll('.controls .btn-icon')]
     .every(e => e.getAttribute('aria-hidden') === 'true') &&
-  document.querySelectorAll('.controls .btn-icon').length === 3`));
+  document.querySelectorAll('.controls .btn-icon').length === 4`));   // play, back, step, reset
 
 // (13) straight quotes wherever code appears
 check('P13 no curly quotes in any code span, packet label or code-ish block detail', await ev(`(() => {
@@ -1405,6 +1488,848 @@ check('R2/E20 keyboard focus still highlights (the modality gate is not a blanke
 })()`));
 
 check('R2 no console errors across the round-2 checks', errs().length === 0, errText());
+await load(1280, 950);
+
+
+// ══════════════════════════════════════════════════ PAGE 2: agent.html
+console.log('\n════ Page 2: agent.html ════');
+console.log('\n── Clean load, structure, static readability');
+await load2(1280, 950);
+
+check('P2 zero console errors or warnings on load', errs().length === 0, errText());
+const net2 = events.filter(e => e.method === 'Network.requestWillBeSent').map(e => e.params.request.url);
+check('P2 zero remote network requests', net2.filter(u => /^(https?|ws|ftp):/i.test(u)).length === 0,
+  `saw: ${JSON.stringify(net2)}`);
+check('P2 no fetch/XHR/WebSocket/storage in source', await ev(
+  `!/fetch\\(|XMLHttpRequest|new WebSocket|localStorage|sessionStorage|document\\.cookie/
+     .test(document.documentElement.outerHTML)`));
+
+check('P2 all required sections present in order', await ev(`(() => {
+  const ids = [...document.querySelectorAll('main > section')].map(s => s.id);
+  return ['intro','simulation','walkthrough','anatomy','semantic','skills','autonomy','glossary']
+    .every((id, i, arr) => ids.includes(id) &&
+      (i === 0 || ids.indexOf(id) > ids.indexOf(arr[i - 1])));
+})()`));
+// User-mandated: the simulation leads the page, as it does on index.html.
+check('P2 the simulation is the first major section, before the anatomy', await ev(`(() => {
+  const ids = [...document.querySelectorAll('main > section')].map(s => s.id);
+  return ids[0] === 'intro' && ids[1] === 'simulation'
+      && ids.indexOf('simulation') < ids.indexOf('anatomy')
+      && ids.indexOf('simulation') < ids.indexOf('semantic')
+      && ids.indexOf('simulation') < ids.indexOf('skills');
+})()`));
+check('P2 header carries the Part 2 framing', await ev(`
+  document.querySelectorAll('h1').length === 1 &&
+  /part 2/i.test(document.querySelector('.partmark').textContent)`));
+
+// AC: cross-links resolve as relative links, both directions
+check('AC P2 links back to page 1 with a relative href', await ev(`(() => {
+  const as = [...document.querySelectorAll('a[href="index.html"]')];
+  return as.length >= 2 && as.every(a => !/^https?:/.test(a.getAttribute('href')));
+})()`));
+const p2Href = await ev(`document.querySelector('header a[href="index.html"]').href`);
+check('AC page-1 link from page 2 resolves to the real file',
+  p2Href === FILE, `${p2Href} vs ${FILE}`);
+
+// AC: every concept readable statically
+const t2 = await ev(`document.body.innerText`);
+const concepts2 = {
+  'agent composition': /what an agent is composed of/i,
+  'identity always-resident': /always[- ]resident/i,
+  'semantic layer tiers': /semantic layer/i,
+  'just-in-time loading': /just[- ]in[- ]time/i,
+  'skill = metadata + instructions': /metadata .*(load|when)|when_to_use/i,
+  'context budget rationale': /context.{0,30}scarce|budget/i,
+  'compaction': /compact/i,
+  'memory': /memory/i,
+  'permission policy': /permission policy/i,
+  'autonomy boundary': /bounded by policy|boundary of .autonom/i,
+  'self-correction': /self[- ]correct/i,
+};
+const missing2 = Object.entries(concepts2).filter(([, re]) => !re.test(t2)).map(([k]) => k);
+check('AC P2 every concept appears in static page text', missing2.length === 0,
+  `missing: ${missing2.join(', ')}`);
+check('AC P2 all eight component definitions are in the DOM statically', await ev(`
+  document.querySelectorAll('.anat-def').length === 8 &&
+  [...document.querySelectorAll('.anat-def')].every(d =>
+    d.querySelector('h3') && d.querySelector('.an-role') &&
+    d.textContent.length > 200)`));
+check('P2 the five knowledge tiers each state a loading rule', await ev(`(() => {
+  const tiers = [...document.querySelectorAll('.tier')];
+  return tiers.length === 5 &&
+    tiers.every(t => t.querySelector('.t-rule').textContent.trim().length > 5) &&
+    ['identity','project','skill','memory','work']
+      .every(l => tiers.some(t => t.getAttribute('data-layer') === l));
+})()`));
+check('P2 annotated skill file shows metadata and instructions', await ev(`(() => {
+  const code = document.querySelector('#skills pre.codeblock').textContent;
+  const annots = document.querySelectorAll('#skills .annot').length;
+  return /when_to_use/.test(code) && /allowed_tools/.test(code) &&
+         /^---/m.test(code) && /Never deploy without/.test(code) && annots >= 2;
+})()`));
+check('P2 glossary defines the terms this page adds', await ev(`(() => {
+  const t = [...document.querySelectorAll('dl.gloss dt')].map(d => d.textContent.toLowerCase());
+  return ['agent','identity','semantic layer','skill','just-in-time','memory',
+          'compaction','permission policy','self-correction'].every(k => t.some(x => x.includes(k)));
+})()`));
+
+console.log('\n── Anatomy interaction');
+check('MX P2 activating a component shows its definition and dims the others', await ev(`(() => {
+  const btn = document.querySelector('.anat-node[data-comp="policy"]');
+  btn.click();
+  const open = [...document.querySelectorAll('.anat-def.is-open')];
+  const pressed = [...document.querySelectorAll('.anat-node[aria-expanded="true"]')];
+  return open.length === 1 && open[0].id === 'def-policy'
+      && pressed.length === 1 && pressed[0] === btn
+      && document.querySelector('.anat').classList.contains('picked');
+})()`));
+check('MX P2 unselected components are dimmed but stay legible', await ev(`(async () => {
+  const other = document.querySelector('.anat-node[data-comp="model"]');
+  await new Promise(r => setTimeout(r, 320));       // opacity is transitioned
+  const o = parseFloat(getComputedStyle(other).opacity);
+  return o < 1 && o >= 0.6;                         // dimmed, but above the contrast floor
+})()`));
+check('MX P2 activating the same component again clears the selection', await ev(`(async () => {
+  document.querySelector('.anat-node[data-comp="policy"]').click();
+  await new Promise(r => setTimeout(r, 320));       // let the un-dim transition finish
+  return document.querySelectorAll('.anat-def.is-open').length === 0
+      && !document.querySelector('.anat').classList.contains('picked')
+      && parseFloat(getComputedStyle(document.querySelector('.anat-node[data-comp="model"]')).opacity) === 1;
+})()`));
+check('MX P2 components are keyboard-activatable with disclosure ARIA (JS upgrade)', await ev(`(() => {
+  const ns = [...document.querySelectorAll('.anat-node')];
+  return ns.length === 8 && ns.every(n =>
+    n.getAttribute('role') === 'button' && n.tabIndex >= 0 &&
+    n.hasAttribute('aria-expanded') &&
+    !!document.getElementById(n.getAttribute('aria-controls')));
+})()`));
+await ev(`document.querySelector('.anat-node[data-comp="skills"]').focus()`);
+// rawKeyDown does not trigger a button's default action; keyDown + keyUp does.
+await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter',
+                                       windowsVirtualKeyCode: 13, text: '\r' });
+await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter',
+                                       windowsVirtualKeyCode: 13 });
+await sleep(200);
+check('MX P2 keyboard Enter activates a component', await ev(`
+  document.getElementById('def-skills').classList.contains('is-open') &&
+  document.querySelector('.anat-node[data-comp="skills"]').getAttribute('aria-expanded') === 'true'`));
+await ev(`document.querySelector('.anat-node[data-comp="skills"]').click()`);   // reset
+check('MX P2 clicking inert areas of the diagram does nothing', await ev(`(() => {
+  const before = document.querySelectorAll('.anat-def.is-open').length;
+  document.getElementById('anat-grid').click();
+  document.getElementById('anat-defs').click();
+  return document.querySelectorAll('.anat-def.is-open').length === before;
+})()`));
+
+console.log('\n── Autonomous simulation');
+check('MX P2 starts at stage 0 with an empty context panel', await ev(`
+  document.getElementById('progress-text').textContent === 'Step 0 of 20' &&
+  document.getElementById('token-count').textContent === '0 tokens' &&
+  document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length === 0`));
+
+let bad2 = '', prevBlocks = 0;
+const trace = [];
+for (let i = 1; i <= 21; i++) {
+  await ev(`document.getElementById('btn-step').click()`);
+  await sleep(90);
+  const st = await ev(`(() => ({
+    prog: document.getElementById('progress-text').textContent,
+    label: document.getElementById('stage-label').textContent,
+    cap: document.getElementById('caption').textContent.length,
+    blocks: document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length,
+    tok: +document.getElementById('token-count').textContent.replace(/[^0-9]/g, ''),
+    comps: document.querySelectorAll('#diagram .actor.on').length
+  }))()`);
+  trace.push(st);
+  const want = i === 21 ? 'Complete' : `Step ${i} of 20`;
+  if (st.prog !== want) bad2 += `stage ${i}: "${st.prog}" != "${want}"; `;
+  if (st.cap < 60) bad2 += `stage ${i}: caption too short; `;
+  prevBlocks = st.blocks;
+}
+check('MX P2 21 Step clicks walk the run with caption, label and panel in sync', !bad2, bad2);
+
+// AC: skill load and compaction must visibly change the panel
+check('AC P2 the skill-load stage adds a skill-layer block', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();
+  const before = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  document.getElementById('btn-step').click();                 // stage 6 = skill loaded
+  const after = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  return before === 0 && after === 1;
+})()`));
+check('AC P2 compaction visibly removes blocks and shrinks the budget', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();   // stage 12, fullest
+  const beforeN = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length;
+  const beforeT = +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  document.getElementById('btn-step').click();                                 // stage 13 = compaction
+  const afterN = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length;
+  const afterT = +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  const summaryShown = !!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="summary"]');
+  const goneIds = ['read1','edit1','test1','fix1']
+    .every(id => !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
+  return afterN < beforeN && afterT < beforeT && summaryShown && goneIds
+      && beforeT === 6128 && afterT === 4148;
+})()`));
+check('AC P2 the skill block is unloaded again at the end of the run', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 19; i++) document.getElementById('btn-step').click();
+  const before = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  document.getElementById('btn-step').click();                 // stage 20 = release layers
+  const after = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  const identityKept = !!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-layer="identity"]');
+  return before === 1 && after === 0 && identityKept;
+})()`));
+check('P2 context blocks are colour-coded by layer, all five layers used', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 19; i++) document.getElementById('btn-step').click();
+  const layers = new Set([...document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)')]
+    .map(b => b.getAttribute('data-layer')));
+  return ['identity','project','skill','memory','work'].every(l => layers.has(l));
+})()`));
+
+// AC: the permission gate must read as a policy stop
+check('AC P2 the permission gate names policy, not the model, as the cause', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 14; i++) document.getElementById('btn-step').click();   // stage 14
+  const cap = document.getElementById('caption').textContent;
+  const flag = document.querySelector('#caption .gate-flag');
+  const policyChip = document.querySelector('#diagram .actor[data-comp="policy"]').classList.contains('on');
+  return /permission policy/i.test(cap) && /did not choose to pause/i.test(cap)
+      && !!flag && /policy stop/i.test(flag.textContent) && policyChip;
+})()`));
+check('P2 the self-correction arc is present and captioned as such', await ev(`(() => {
+  const walk = [...document.querySelectorAll('#walkthrough-list li')].map(li => li.textContent);
+  return /and it fails/i.test(walk[8]) && /diagnose/i.test(walk[9])
+      && /fix/i.test(walk[10]) && /green/i.test(walk[11]);
+})()`));
+check('P2 a component is highlighted on every one of the 20 steps', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let lit = 0;
+  for (let i = 1; i <= 20; i++) {
+    document.getElementById('btn-step').click();
+    if (document.querySelectorAll('#diagram .actor.on').length > 0) lit++;
+  }
+  return lit === 20;
+})()`));
+
+
+console.log('\n── Page 2: graphical language (must match index.html)');
+check('GFX P2 the diagram has positioned actor boxes with icon, name and sub-caption', await ev(`(() => {
+  const as = [...document.querySelectorAll('#diagram .actor')];
+  return as.length === 8 &&
+    as.every(a => a.querySelector('.icon') && a.querySelector('.name') && a.querySelector('.sub')) &&
+    ['identity','semantic','skills','memory','harness','model','tools','policy']
+      .every(c => as.some(a => a.getAttribute('data-comp') === c));
+})()`));
+check('GFX P2 dashed SVG wires connect the components', await ev(`(() => {
+  const ls = [...document.querySelectorAll('#wires line')];
+  if (ls.length !== 7) return false;
+  // No regex here: \d inside a template literal collapses to a literal 'd'.
+  const dash = getComputedStyle(ls[0]).strokeDasharray;
+  const dashed = dash && dash !== 'none' && parseFloat(dash) > 0;
+  return dashed &&
+    ls.every(l => ['x1','y1','x2','y2'].every(a => isFinite(parseFloat(l.getAttribute(a)))));
+})()`));
+check('GFX P2 every wire terminates on an actor centre', await ev(`(() => {
+  const d = document.getElementById('diagram').getBoundingClientRect();
+  const centres = [...document.querySelectorAll('#diagram .actor')].map(a => {
+    const r = a.getBoundingClientRect();
+    return { x: Math.round(r.left - d.left + r.width / 2), y: Math.round(r.top - d.top + r.height / 2) };
+  });
+  const near = (x, y) => centres.some(c => Math.abs(c.x - x) < 3 && Math.abs(c.y - y) < 3);
+  return [...document.querySelectorAll('#wires line')].every(l =>
+    near(Math.round(+l.getAttribute('x1')), Math.round(+l.getAttribute('y1'))) &&
+    near(Math.round(+l.getAttribute('x2')), Math.round(+l.getAttribute('y2'))));
+})()`));
+check('GFX P2 wires are redrawn when the diagram resizes, with no window resize', await ev(`(async () => {
+  const grid = document.querySelector('.sim-grid');
+  const coords = () => [...document.querySelectorAll('#wires line')]
+    .map(l => ['x1','y1','x2','y2'].map(a => l.getAttribute(a)).join()).join('|');
+  const before = coords();
+  grid.style.gridTemplateColumns = 'minmax(0,3fr) minmax(0,7fr)';
+  await new Promise(r => setTimeout(r, 350));
+  const mid = coords();
+  grid.style.gridTemplateColumns = '';
+  await new Promise(r => setTimeout(r, 350));
+  return before !== mid && coords() === before;
+})()`));
+
+check('GFX P2 a labelled packet travels between components on stages that move', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  const pk = document.getElementById('packet');
+  const seen = [];
+  for (let i = 1; i <= 20; i++) {
+    document.getElementById('btn-step').click();
+    await new Promise(r => setTimeout(r, 40));
+    if (pk.classList.contains('visible') && pk.textContent.trim())
+      seen.push(i + ':' + pk.textContent.trim());
+  }
+  return seen.length === ${MOVE_STAGES};        // derived from the page source
+})()`));
+check('GFX P2 the packet actually moves from source to target', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  const pk = document.getElementById('packet');
+  document.getElementById('btn-step').click();          // step 4: harness -> model
+  const start = pk.getBoundingClientRect().left;
+  await new Promise(r => setTimeout(r, 900));
+  const end = pk.getBoundingClientRect().left;
+  const model = document.getElementById('actor-model').getBoundingClientRect();
+  return Math.abs(end - start) > 40 && end + pk.offsetWidth / 2 > model.left - 60;
+})()`));
+check('GFX P2 the packet lands beside its target, not on top of its label', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  const pk = document.getElementById('packet');
+  // Measure the glyphs, not the block: .name/.sub are full-width divs, so their
+  // boxes overlap long before any text does.
+  const textRects = [];
+  [...document.querySelectorAll('#diagram .actor .name, #diagram .actor .sub')].forEach(el => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    [...r.getClientRects()].forEach(cr => { if (cr.width > 2) textRects.push(cr); });
+  });
+  let worst = 0;
+  for (let i = 1; i <= 20; i++) {
+    document.getElementById('btn-step').click();
+    await new Promise(r => setTimeout(r, 820));            // let the flight finish
+    if (!pk.classList.contains('visible')) continue;
+    const pr = pk.getBoundingClientRect();
+    textRects.forEach(nr => {
+      const ox = Math.min(pr.right, nr.right) - Math.max(pr.left, nr.left);
+      const oy = Math.min(pr.bottom, nr.bottom) - Math.max(pr.top, nr.top);
+      if (ox > 0 && oy > 0) worst = Math.max(worst, Math.min(ox, oy));
+    });
+  }
+  return worst === 0;
+})()`));
+
+check('GFX P2 the packet never escapes the diagram at any stage', await ev(`(() => {
+  const d = document.getElementById('diagram'), pk = document.getElementById('packet');
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 21; i++) {
+    document.getElementById('btn-step').click();
+    if (!pk.classList.contains('visible')) continue;
+    const dr = d.getBoundingClientRect(), pr = pk.getBoundingClientRect();
+    if (pr.left < dr.left - 1 || pr.right > dr.right + 1) return false;
+  }
+  return true;
+})()`));
+check('GFX P2 the active component carries a highlight ring', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 14; i++) document.getElementById('btn-step').click();   // policy gate
+  const policy = document.querySelector('#diagram .actor[data-comp="policy"]');
+  const shadow = getComputedStyle(policy).boxShadow;
+  return policy.classList.contains('on') && shadow !== 'none' && shadow.length > 5;
+})()`));
+
+check('GFX P2 compaction visibly animates blocks out before removing them', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  document.getElementById('btn-step').click();                 // stage 13 = compaction
+  const collapsing = document.querySelectorAll('#ctx-stack .ctx-block.leaving').length;
+  await new Promise(r => setTimeout(r, 450));
+  const after = document.querySelectorAll('#ctx-stack .ctx-block.leaving').length;
+  const live = document.querySelectorAll('#ctx-stack .ctx-block').length;
+  return collapsing === 4 && after === 0 && live === 9;
+})()`));
+check('GFX P2 the skill-load stage animates its block in', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();
+  document.getElementById('btn-step').click();                 // stage 6 = skill load
+  const blk = document.querySelector('#ctx-stack .ctx-block[data-layer="skill"]');
+  return !!blk && blk.classList.contains('enter');             // starts offset, then settles
+})()`));
+
+
+
+
+
+console.log('\n── Page 2: round-3 content and correctness fixes');
+await load2(1280, 950);
+check('R3/A1 each knowledge tier renders its own layer colour, not grey', await ev(`(() => {
+  const seen = new Set();
+  const ok = [...document.querySelectorAll('.tier')].every(t => {
+    const c = getComputedStyle(t).borderLeftColor;
+    const grey = getComputedStyle(t).borderTopColor;      // --line
+    seen.add(c);
+    return c !== grey && parseFloat(getComputedStyle(t).borderLeftWidth) >= 4;
+  });
+  return ok && seen.size === 5;                            // five distinct rails
+})()`));
+check('R3/A2 Skill has its own colour, distinct from Model', await ev(`(() => {
+  const v = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  return v('--c-skill') !== v('--c-model') && v('--c-skill-bg') !== v('--c-model-bg');
+})()`));
+check('R3/A5+A6 the skill file contains the smoke-check step and admits the deploy', await ev(`(() => {
+  const code = document.querySelector('#skills pre.codeblock').textContent;
+  return code.indexOf('6. Smoke-check the health endpoint') !== -1 &&
+         code.indexOf('run_shell, deploy]') !== -1;
+})()`));
+check('R3/A7 the memory write is not a context block and costs nothing', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 18; i++) document.getElementById('btn-step').click();
+  const before = +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  const nBefore = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length;
+  const flashBefore = document.getElementById('mem-flash').hidden;
+  document.getElementById('btn-step').click();             // stage 19: memory write
+  const after = +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  const nAfter = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length;
+  const flashAfter = document.getElementById('mem-flash').hidden;
+  return before === after && nBefore === nAfter && flashBefore === true && flashAfter === false;
+})()`));
+check('R3/A7 the memory marker is reversible with Back', await ev(`(() => {
+  document.getElementById('btn-back').click();
+  return document.getElementById('mem-flash').hidden === true;
+})()`));
+check('R3/A8 component lighting matches actual participation', await ev(`(() => {
+  const lit = n => {
+    document.getElementById('btn-reset').click();
+    for (let i = 0; i < n; i++) document.getElementById('btn-step').click();
+    return [...document.querySelectorAll('#diagram .actor.on')].map(a => a.getAttribute('data-comp')).sort().join();
+  };
+  return lit(13) === 'harness'            // compaction is harness-only
+      && lit(20) === 'harness'            // releasing layers likewise
+      && lit(3)  === 'harness,memory'     // recall is memory, not the semantic layer
+      && lit(6)  === 'harness,skills';
+})()`));
+check('R3/A9 one visible name per concept: Project knowledge', await ev(`(() => {
+  const tiers = [...document.querySelectorAll('.tier .t-name')].map(e => e.textContent);
+  const legend = [...document.querySelectorAll('.legend li')].map(e => e.textContent);
+  return tiers.includes('Project knowledge') &&
+         !tiers.some(t => /durable project knowledge/i.test(t)) &&
+         legend.some(l => /Project knowledge/.test(l)) &&
+         /holds project/i.test(document.querySelector('#actor-semantic .sub').textContent);
+})()`));
+check('R3/A10 the components-to-tiers bridge is stated', await ev(`
+  /Three of the components/.test(document.getElementById('semantic').textContent) &&
+  /never enter the context/.test(document.getElementById('semantic').textContent)`));
+check('R3/A11 the budget is marked as illustrative', await ev(`
+  /Scaled down so the changes are visible/.test(document.querySelector('.ctx-meter').textContent) &&
+  /100,000/.test(document.querySelector('.ctx-meter').textContent)`));
+check('R3/A12 the injection surface is called out and links page 1', await ev(`(() => {
+  const a = document.getElementById('autonomy');
+  return /untrusted/i.test(a.textContent) && /steps 9 and 10/i.test(a.textContent)
+      && !!a.querySelector('a[href="index.html#g-injection"]');
+})()`));
+check('R3/A13 autonomy covers denial, ceilings and delegation', await ev(`(() => {
+  const t = document.getElementById('autonomy').textContent;
+  return /when the answer is no/i.test(t) && /iteration ceiling/i.test(t)
+      && /delegation/i.test(t) && /own context window/i.test(t);
+})()`));
+check('R3/A14 a project-context file is shown and annotated', await ev(`(() => {
+  const sec = document.getElementById('project-context');
+  if (!sec) return false;
+  const code = sec.querySelector('pre.codeblock').textContent;
+  return /scope: always/.test(code) && /webhook signer/.test(code)
+      && sec.querySelectorAll('.annot').length >= 2;
+})()`));
+check('R3/A15 the glossary defines context budget', await ev(`
+  !!document.getElementById('g-budget') &&
+  /re-sent on every model call/.test(document.getElementById('g-budget').nextElementSibling.textContent)`));
+check('R3/A16 the static walkthrough shows the policy-stop pill', await ev(`(() => {
+  const gate = document.getElementById('walk-14');
+  return !!gate && !!gate.querySelector('.gate-flag') &&
+    /policy stop/i.test(gate.querySelector('.gate-flag').textContent) &&
+    document.querySelectorAll('#walkthrough-list .gate-flag').length === 2;
+})()`));
+check('R3/A17 compaction deletes in place without reordering the survivors', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  const order = () => [...document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)')]
+    .map(b => b.getAttribute('data-id'));
+  const before = order().filter(id => !['read1','edit1','test1','fix1'].includes(id));
+  document.getElementById('btn-step').click();             // compaction
+  const during = order();
+  await new Promise(r => setTimeout(r, 450));
+  const after = order();
+  // survivors keep their relative order, both mid-collapse and after removal
+  return before.join() === during.slice(0, before.length).join()
+      && after.join() === before.concat(['summary']).join();
+})()`));
+check('R3/A18 the token note percentage cannot disagree with the bar', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  const bar = parseFloat(document.getElementById('token-fill').style.width);
+  // No regex: \d inside a template literal becomes a literal 'd'.
+  const txt = document.getElementById('token-note').textContent;
+  const note = parseFloat(txt.split('(').pop().split('%')[0]);
+  return isFinite(note) && Math.abs(Math.round(bar) - note) === 0;
+})()`));
+
+console.log('\n── Page 2: round-3 interaction fixes');
+check('R3/B19 disabling Back never strands focus on it', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  document.getElementById('btn-step').click();             // stage 1, Back enabled
+  document.getElementById('btn-back').focus();
+  document.getElementById('btn-back').click();             // -> stage 0, Back disabled
+  return document.getElementById('btn-back').disabled === true &&
+         document.activeElement === document.getElementById('btn-step');
+})()`));
+check('R3/B20 anatomy uses disclosure semantics with Escape to clear', await ev(`(() => {
+  const n = document.querySelector('.anat-node[data-comp="policy"]');
+  n.click();
+  const opened = n.getAttribute('aria-expanded') === 'true' &&
+                 document.getElementById('def-policy').classList.contains('is-open') &&
+                 !n.hasAttribute('aria-pressed');
+  n.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+  return opened && n.getAttribute('aria-expanded') === 'false' &&
+         document.querySelectorAll('.anat-def.is-open').length === 0;
+})()`));
+check('R3/B20 dimmed components stay legible', await ev(`(async () => {
+  document.querySelector('.anat-node[data-comp="policy"]').click();
+  await new Promise(r => setTimeout(r, 320));
+  const o = parseFloat(getComputedStyle(document.querySelector('.anat-node[data-comp="model"]')).opacity);
+  document.querySelector('.anat-node[data-comp="policy"]').click();
+  return o >= 0.6 && o < 1;
+})()`));
+check('R3/B21 a resize mid-flight re-issues the packet instead of snapping', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  document.getElementById('btn-step').click();             // starts a flight
+  const grid = document.querySelector('.sim-grid');
+  grid.style.gridTemplateColumns = 'minmax(0,6fr) minmax(0,6fr)';
+  await new Promise(r => setTimeout(r, 60));
+  const t = document.getElementById('packet').style.transition;
+  grid.style.gridTemplateColumns = '';
+  return t !== 'none' && t.indexOf('transform') === 0 && t.indexOf('ms') > 0;
+})()`));
+await load2(1280, 950, [{ name: 'prefers-color-scheme', value: 'light' }]);
+await ev(`for (let i = 0; i < 13; i++) document.getElementById('btn-step').click();
+          document.getElementById('simulation').scrollIntoView({behavior:'instant', block:'start'});`);
+await sleep(700);
+await shot('p2-light-compaction', true);
+await load2(1280, 950, [{ name: 'prefers-color-scheme', value: 'dark' }]);
+await ev(`for (let i = 0; i < 14; i++) document.getElementById('btn-step').click();
+          document.getElementById('simulation').scrollIntoView({behavior:'instant', block:'start'});`);
+await sleep(700);
+await shot('p2-dark-gate', true);
+check('R3 no console errors across the round-3 checks', errs().length === 0, errText());
+await load2(1280, 950);
+
+console.log('\n── Page 2: sim keyboard and a11y parity with page 1');
+await load2(1280, 950);
+check('P2/KB Space is NOT intercepted when the simulation is scrolled out of view', await ev(`(() => {
+  window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'});
+  const e = new KeyboardEvent('keydown', {key:' ', bubbles:true, cancelable:true});
+  document.body.dispatchEvent(e);
+  const started = /Pause/.test(document.getElementById('btn-play').textContent);
+  return !e.defaultPrevented && !started;
+})()`));
+check('P2/KB Space IS intercepted while the simulation is in view', await ev(`(() => {
+  window.scrollTo({top: 0, behavior: 'instant'});
+  document.getElementById('btn-reset').click();
+  const e = new KeyboardEvent('keydown', {key:' ', bubbles:true, cancelable:true});
+  document.body.dispatchEvent(e);
+  const started = /Pause/.test(document.getElementById('btn-play').textContent);
+  if (started) document.getElementById('btn-play').click();
+  return e.defaultPrevented && started;
+})()`));
+await ev(`document.getElementById('btn-reset').click();
+          document.getElementById('btn-play').focus()`);
+await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+await send('Input.dispatchKeyEvent', { type: 'char', key: ' ', text: ' ', unmodifiedText: ' ' });
+await send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+await sleep(300);
+const p2SpaceBtn = await ev(`/Pause/.test(document.getElementById('btn-play').textContent)`);
+await ev(`if (/Pause/.test(document.getElementById('btn-play').textContent))
+            document.getElementById('btn-play').click()`);
+check('P2/KB Space on a focused Play button activates it exactly once', p2SpaceBtn);
+check('P2/KB Ctrl/Meta/Alt chords are ignored', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  const before = document.getElementById('progress-text').textContent;
+  [{key:'r',ctrlKey:true},{key:'r',metaKey:true},{key:' ',ctrlKey:true},{key:'ArrowRight',altKey:true}]
+    .forEach(o => document.body.dispatchEvent(
+      new KeyboardEvent('keydown', Object.assign({bubbles:true, cancelable:true}, o))));
+  return document.getElementById('progress-text').textContent === before;
+})()`));
+await ev(`document.activeElement.blur(); window.scrollTo({top:0, behavior:'instant'})`);
+await key('r', 'KeyR', 82); await sleep(150);
+check('P2/KB R resets the simulation',
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 0 of 20');
+check('P2/KB no-op arrows do not swallow the key', await ev(`(() => {
+  document.getElementById('btn-reset').click();                 // stage 0
+  const back = new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true, cancelable:true});
+  document.body.dispatchEvent(back);
+  for (let i = 0; i < 21; i++) document.getElementById('btn-step').click();   // final stage
+  const fwd = new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true, cancelable:true});
+  document.body.dispatchEvent(fwd);
+  return !back.defaultPrevented && !fwd.defaultPrevented;
+})()`));
+check('P2/KB keys typed inside the anatomy section never drive the simulation', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
+  const before = document.getElementById('progress-text').textContent;
+  const node = document.querySelector('.anat-node');
+  node.focus();
+  [' ','r','ArrowRight','ArrowLeft'].forEach(k => node.dispatchEvent(
+    new KeyboardEvent('keydown', {key:k, bubbles:true, cancelable:true})));
+  return document.getElementById('progress-text').textContent === before
+      && !/Pause/.test(document.getElementById('btn-play').textContent);
+})()`));
+check('P2/A11Y control glyphs are hidden from assistive tech', await ev(`
+  [...document.querySelectorAll('.controls .btn-icon')].every(e => e.getAttribute('aria-hidden') === 'true') &&
+  document.querySelectorAll('.controls .btn-icon').length === 4`));
+check('P2/A11Y accessible names equal the visible words', await ev(`(() => {
+  return [['btn-play','Play'],['btn-back','Back'],['btn-step','Step'],['btn-reset','Reset']].every(([id, w]) => {
+    const b = document.getElementById(id);
+    return !b.hasAttribute('aria-label') && b.querySelector('.btn-word').textContent === w;
+  }) && !document.getElementById('speed').hasAttribute('aria-label');
+})()`));
+check('P2/A11Y the caption panel is an atomic live region', await ev(`
+  document.querySelector('.caption-box').getAttribute('aria-live') === 'polite' &&
+  document.querySelector('.caption-box').getAttribute('aria-atomic') === 'true'`));
+check('P2/A11Y decorative diagram parts are hidden from assistive tech', await ev(`
+  document.getElementById('wires').getAttribute('aria-hidden') === 'true' &&
+  document.getElementById('packet').getAttribute('aria-hidden') === 'true' &&
+  [...document.querySelectorAll('#diagram .actor .icon')].every(i => i.getAttribute('aria-hidden') === 'true')`));
+check('P2/CTRL Back and Step both halt autoplay', await ev(`(() => {
+  const start = () => { document.getElementById('btn-reset').click();
+                        document.getElementById('btn-play').click(); };
+  start();
+  const wasPlaying = /Pause/.test(document.getElementById('btn-play').textContent);
+  document.getElementById('btn-step').click();
+  const afterStep = /Play/.test(document.getElementById('btn-play').textContent);
+  start();
+  document.getElementById('btn-step').click();
+  document.getElementById('btn-back').click();
+  const afterBack = /Play/.test(document.getElementById('btn-play').textContent);
+  return wasPlaying && afterStep && afterBack;
+})()`));
+check('P2/CTRL changing speed mid-play reschedules without stopping', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  document.getElementById('btn-play').click();
+  document.getElementById('speed').value = '0.6';
+  document.getElementById('speed').dispatchEvent(new Event('change'));
+  const stillPlaying = /Pause/.test(document.getElementById('btn-play').textContent);
+  document.getElementById('btn-play').click();
+  document.getElementById('speed').value = '1';
+  document.getElementById('speed').dispatchEvent(new Event('change'));
+  return stillPlaying;
+})()`));
+
+console.log('\n── Back-step (page 2)');
+check('BACK P2 the Back button exists, is disabled at stage 0, and names itself', await ev(`(() => {
+  document.getElementById('btn-reset').click();      // earlier checks left the run mid-way
+  const b = document.getElementById('btn-back');
+  return !!b && b.disabled === true && !b.hasAttribute('aria-label')
+      && b.querySelector('.btn-word').textContent === 'Back';
+})()`));
+check('BACK P2 back from stage N lands at N-1 with the panel in sync', await ev(`(() => {
+  const live = () => document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length;
+  const tok  = () => +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 6; i++) document.getElementById('btn-step').click();   // skill loaded
+  const at6 = [live(), tok()];
+  document.getElementById('btn-back').click();                               // -> stage 5
+  const at5 = [live(), tok()];
+  return at6[0] === 6 && at5[0] === 5
+      && at6[1] - at5[1] === 800                       // the skill block's tokens
+      && document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length === 0
+      && document.getElementById('progress-text').textContent === 'Step 5 of 20';
+})()`));
+// The add/drop model has to be reversible, not just replayable forward.
+check('BACK P2 stepping back across compaction restores the pre-compaction panel', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  const before = {
+    n: document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length,
+    t: +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '')
+  };
+  document.getElementById('btn-step').click();                 // stage 13: compaction
+  await new Promise(r => setTimeout(r, 450));                  // let the collapse finish
+  const compacted = {
+    n: document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length,
+    t: +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '')
+  };
+  document.getElementById('btn-back').click();                 // back to stage 12
+  const restored = {
+    n: document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length,
+    t: +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '')
+  };
+  const fourBack = ['read1','edit1','test1','fix1'].every(id =>
+    !!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
+  const summaryGone = !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="summary"]');
+  return before.n === 12 && before.t === 6128
+      && compacted.n === 9 && compacted.t === 4148
+      && restored.n === 12 && restored.t === 6128
+      && fourBack && summaryGone;
+})()`));
+check('BACK P2 backward takes the instant path (no packet flight queued)', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 8; i++) document.getElementById('btn-step').click();
+  document.getElementById('btn-back').click();
+  return document.getElementById('packet').style.transition === 'none';
+})()`));
+check('BACK P2 back to stage 0 empties the panel and then no-ops', await ev(`(() => {
+  for (let i = 0; i < 15; i++) document.getElementById('btn-back').click();
+  document.getElementById('btn-back').click();
+  return document.getElementById('progress-text').textContent === 'Step 0 of 20'
+      && document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length === 0
+      && document.getElementById('token-count').textContent === '0 tokens'
+      && document.getElementById('btn-back').disabled === true;
+})()`));
+check('BACK P2 the highlighted component follows a backward step', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 14; i++) document.getElementById('btn-step').click();   // policy gate
+  const atGate = document.querySelector('#diagram .actor[data-comp="policy"]').classList.contains('on');
+  document.getElementById('btn-back').click();                                // -> stage 13
+  const afterBack = document.querySelector('#diagram .actor[data-comp="policy"]').classList.contains('on');
+  return atGate && !afterBack &&
+    document.querySelectorAll('#diagram .actor.on').length > 0;
+})()`));
+await ev(`document.getElementById('btn-reset').click();
+          for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();
+          document.activeElement.blur(); window.scrollTo({top:0, behavior:'instant'});`);
+await key('ArrowLeft', 'ArrowLeft', 37); await sleep(120);
+check('BACK P2 ArrowLeft steps back, mirroring ArrowRight',
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 4 of 20');
+check('BACK P2 the keyboard hint advertises the back shortcut', await ev(`(() => {
+  const t = document.querySelector('.kbd-hint').textContent;
+  return /back/i.test(t) && t.includes('←') && t.includes('→');
+})()`));
+check('BACK P2 the live region text changes on a backward step', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 7; i++) document.getElementById('btn-step').click();
+  const before = document.getElementById('ctx-summary').textContent;
+  document.getElementById('btn-back').click();
+  const after = document.getElementById('ctx-summary').textContent;
+  return /blocks?, /.test(before) && /blocks?, /.test(after) && before !== after;
+})()`));
+
+console.log('\n── Page 2: matrix rows');
+check('MX P2 Step past the end is graceful and Reset restarts', await ev(`(() => {
+  for (let i = 0; i < 25; i++) document.getElementById('btn-step').click();
+  const done = document.getElementById('progress-text').textContent === 'Complete';
+  const msg = /reset/i.test(document.getElementById('caption').textContent);
+  document.getElementById('btn-reset').click();
+  return done && msg &&
+    document.getElementById('progress-text').textContent === 'Step 0 of 20' &&
+    document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)').length === 0;
+})()`));
+await ev(`document.getElementById('speed').value='1.8';
+          document.getElementById('speed').dispatchEvent(new Event('change'));
+          document.getElementById('btn-play').click()`);
+await sleep(400);
+check('MX P2 Play autoplays and the button becomes Pause', await ev(`
+  document.getElementById('progress-text').textContent !== 'Step 0 of 20' &&
+  /Pause/.test(document.getElementById('btn-play').textContent)`));
+await ev(`document.getElementById('btn-play').click()`);
+check('MX P2 walkthrough renders all 20 steps statically', await ev(`
+  document.querySelectorAll('#walkthrough-list li').length === 20 &&
+  [...document.querySelectorAll('#walkthrough-list li .wc')].every(e => e.textContent.length > 60)`));
+check('MX P2 controls do not drift as the caption changes length', await ev(`(() => {
+  const c = document.querySelector('.controls');
+  const top = () => Math.round(c.getBoundingClientRect().top + window.scrollY);
+  document.getElementById('btn-reset').click();
+  const tops = [top()];
+  for (let i = 0; i < 21; i++) { document.getElementById('btn-step').click(); tops.push(top()); }
+  return [...new Set(tops)].length === 1;
+})()`));
+
+for (const w of [768, 480, 360]) {
+  await load2(w, 900);
+  check(`MX P2 no horizontal page scroll @${w}px`,
+    await ev(`document.documentElement.scrollWidth <= window.innerWidth + 1`),
+    `scrollWidth=${await ev('document.documentElement.scrollWidth')}`);
+}
+check('MX P2 layout stacks to one column @360px', await ev(`
+  getComputedStyle(document.querySelector('.sim-grid')).gridTemplateColumns.split(' ').length === 1`));
+await load2(360, 800);
+check('GFX P2 @360px the packet stays inside the diagram and actors do not overlap', await ev(`(() => {
+  const d = document.getElementById('diagram'), pk = document.getElementById('packet');
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 21; i++) {
+    document.getElementById('btn-step').click();
+    if (!pk.classList.contains('visible')) continue;
+    const dr = d.getBoundingClientRect(), pr = pk.getBoundingClientRect();
+    if (pr.left < dr.left - 1 || pr.right > dr.right + 1) return false;
+  }
+  const rs = [...document.querySelectorAll('#diagram .actor')].map(a => a.getBoundingClientRect());
+  for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) {
+    if (!(rs[i].right <= rs[j].left + 1 || rs[j].right <= rs[i].left + 1 ||
+          rs[i].bottom <= rs[j].top + 1 || rs[j].bottom <= rs[i].top + 1)) return false;
+  }
+  return true;
+})()`));
+
+await load2(1280, 950, [{ name: 'prefers-color-scheme', value: 'dark' }]);
+check('MX P2 dark theme paints dark background and light text', await ev(`(() => {
+  const bg = getComputedStyle(document.body).backgroundColor.match(/\\d+/g).map(Number);
+  const fg = getComputedStyle(document.body).color.match(/\\d+/g).map(Number);
+  return bg[0] < 50 && bg[1] < 50 && bg[2] < 50 && fg[0] > 190 && fg[1] > 190 && fg[2] > 190;
+})()`));
+await load2(1280, 950, [{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+check('MX P2 reduced motion makes context/chip transitions instant', await ev(`(() => {
+  document.getElementById('btn-step').click();
+  const blk = document.querySelector('#ctx-stack .ctx-block:not(.leaving)');
+  return getComputedStyle(blk).transitionDuration === '0s' &&
+         getComputedStyle(document.querySelector('.actor')).transitionDuration === '0s';
+})()`));
+check('GFX P2 reduced motion takes the instant path: no collapse animation, packet snaps', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  document.getElementById('btn-step').click();            // compaction
+  const collapsing = document.querySelectorAll('#ctx-stack .ctx-block.leaving').length;
+  const entering = document.querySelectorAll('#ctx-stack .ctx-block.enter').length;
+  const snapped = document.getElementById('packet').style.transition === 'none';
+  return collapsing === 0 && entering === 0 && snapped;
+})()`));
+check('GFX P2 wires and packet still render under reduced motion', await ev(`
+  document.querySelectorAll('#wires line').length === 7`));
+check('MX P2 the whole run still completes under reduced motion', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 21; i++) document.getElementById('btn-step').click();
+  return document.getElementById('progress-text').textContent === 'Complete';
+})()`));
+check('P2 no console errors across the simulation checks', errs().length === 0, errText());
+
+// JS off: all prose must still read
+await send('Emulation.setScriptExecutionDisabled', { value: true });
+await load2(1280, 950);
+const doc2 = await send('DOM.getDocument', { depth: -1 });
+// Strip <script> AND <style>: the stylesheet literally contains selectors like
+// [aria-pressed="true"], which would otherwise satisfy assertions about markup.
+const noJs2 = (await send('DOM.getOuterHTML', { nodeId: doc2.root.nodeId })).outerHTML
+  .replace(/<script[\s\S]*?<\/script>/g, '')
+  .replace(/<style[\s\S]*?<\/style>/g, '');
+await send('Emulation.setScriptExecutionDisabled', { value: false });
+check('MX P2 JS off: all eight component definitions are visible',
+  (noJs2.match(/class="anat-def"/g) || []).length === 8 &&
+  !/class="anat-def is-open"/.test(noJs2) && !/anat js/.test(noJs2));
+check('MX P2 JS off: tiers, skill file and glossary all present',
+  (noJs2.match(/class="tier"/g) || []).length === 5 &&
+  /when_to_use/.test(noJs2) && /Permission policy/.test(noJs2));
+check('MX P2 JS off: the notice admits the walkthrough is empty too, not just the sim',
+  /<noscript>/.test(noJs2) && /JavaScript is turned off/.test(noJs2) &&
+  /walkthrough[^<]*rendered by script/.test(noJs2) && /will be empty/.test(noJs2));
+check('MX P2 JS off: the walkthrough really is empty, as the notice says',
+  !/class="wl"/.test(noJs2) && !/id="walk-1"/.test(noJs2));
+check('MX P2 JS off: no interactive affordances are falsely shown',
+  !/aria-expanded/.test(noJs2) && !/role="button"/.test(noJs2) &&
+  !/class="[^"]*picked/.test(noJs2) && !/<button/.test(noJs2.split('anat-grid')[1] || ''));
+
+// AC: page 1 links forward, and the target resolves
+await load(1280, 950);
+check('AC page 1 carries the part marker and both forward links', await ev(`
+  /part 1 of 2/i.test(document.querySelector('header.site .partmark').textContent) &&
+  document.querySelectorAll('a[href="agent.html"]').length === 2 &&
+  !!document.querySelector('header.site a[href="agent.html"]') &&
+  !!document.querySelector('footer.site a[href="agent.html"]')`));
+const p1Href = await ev(`document.querySelector('a[href="agent.html"]').href`);
+check('AC page-2 link from page 1 resolves to the real file',
+  p1Href === FILE2, `${p1Href} vs ${FILE2}`);
+check('AC page 1 keeps every section and control it had before page 2 existed', await ev(`(() => {
+  const ids = [...document.querySelectorAll('main > section')].map(s => s.id);
+  const want = ['intro','simulation','walkthrough','context-anatomy','tool-anatomy','deep-dive','glossary'];
+  return want.every(id => ids.includes(id))
+      && document.querySelectorAll('#pseudo .pl').length === 26
+      && document.querySelectorAll('.sub-card').length === 5
+      && document.querySelectorAll('#walkthrough-list li').length === 14
+      && ['btn-play','btn-back','btn-step','btn-reset','speed'].every(i => !!document.getElementById(i))
+      && document.getElementById('progress-text').textContent === 'Step 0 of 14';
+})()`));
 await load(1280, 950);
 
 writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2));
