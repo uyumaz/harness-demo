@@ -108,14 +108,14 @@ check('page structure: header, 4 actors, all sections, footer', await ev(`
 // ══════════════════════════════════════════ Matrix: step through
 console.log('\n── Matrix: Step advances exactly one stage per click, in sync');
 check('starts at stage 0 with an empty context stack', await ev(`
-  document.getElementById('progress-text').textContent === 'Step 0 of 14' &&
+  document.getElementById('progress-text').textContent === 'Step 0 of 15' &&
   document.getElementById('token-count').textContent === '0 tokens' &&
   [...document.querySelectorAll('#ctx-stack .ctx-block')].every(b => b.hidden)`));
 
 let bad = '';
-const expectTokens = { 3: 3612, 5: 3652, 10: 3832, 12: 3927 };
+const expectTokens = { 3: 2400, 4: 3612, 6: 3652, 11: 3832, 13: 3927 };
 let seenTokens = 0;
-for (let i = 1; i <= 15; i++) {
+for (let i = 1; i <= 16; i++) {
   await ev(`document.getElementById('btn-step').click()`);
   await sleep(120);
   const st = await ev(`(() => ({
@@ -127,7 +127,7 @@ for (let i = 1; i <= 15; i++) {
     hl: [...document.querySelectorAll('.actor')].filter(a => /hl-/.test(a.className)).length,
     fill: parseFloat(document.getElementById('token-fill').style.width)
   }))()`);
-  const wantProg = i === 15 ? 'Complete' : `Step ${i} of 14`;
+  const wantProg = i === 16 ? 'Complete' : `Step ${i} of 15`;
   if (st.prog !== wantProg) bad += `stage ${i}: progress "${st.prog}" != "${wantProg}"; `;
   if (st.cap < 40) bad += `stage ${i}: caption too short (${st.cap}); `;
   if (st.tok < seenTokens) bad += `stage ${i}: token count went backwards; `;
@@ -135,7 +135,7 @@ for (let i = 1; i <= 15; i++) {
   if (st.hl > 1) bad += `stage ${i}: ${st.hl} actors highlighted; `;
   seenTokens = st.tok;
 }
-check('15 Step clicks walk the turn with caption, label, actor highlight and token stack in sync', !bad, bad);
+check('16 Step clicks walk the turn with caption, label, actor highlight and token stack in sync', !bad, bad);
 check('final state: all 6 context blocks visible, 3,927 tokens', await ev(`
   [...document.querySelectorAll('#ctx-stack .ctx-block')].filter(b => !b.hidden).length === 6 &&
   document.getElementById('token-count').textContent === '3,927 tokens'`));
@@ -144,7 +144,7 @@ check('final state: all 6 context blocks visible, 3,927 tokens', await ev(`
 const fills = await ev(`(() => {
   const out = [];
   document.getElementById('btn-reset').click();
-  for (let i = 0; i <= 15; i++) {
+  for (let i = 0; i <= 16; i++) {
     out.push(parseFloat(document.getElementById('token-fill').style.width) || 0);
     document.getElementById('btn-step').click();
   }
@@ -170,7 +170,7 @@ check('no errors after hammering Step past the end', errs().length === 0, errTex
 await ev(`document.getElementById('btn-play').click()`);
 await sleep(200);
 check('Play at the end restarts the turn from stage 0', await ev(`
-  /Step [0-9] of 14/.test(document.getElementById('progress-text').textContent)`));
+  /Step [0-9] of 15/.test(document.getElementById('progress-text').textContent)`));
 await ev(`document.getElementById('btn-play').click()`); // pause
 
 // ══════════════════════════════════════════ Matrix: reset
@@ -178,7 +178,7 @@ console.log('\n── Matrix: Reset');
 await ev(`document.getElementById('btn-reset').click()`);
 await sleep(150);
 check('Reset returns to stage 0, empties the stack and zeroes the meter', await ev(`
-  document.getElementById('progress-text').textContent === 'Step 0 of 14' &&
+  document.getElementById('progress-text').textContent === 'Step 0 of 15' &&
   document.getElementById('token-count').textContent === '0 tokens' &&
   document.getElementById('stage-label').textContent === 'Ready' &&
   parseFloat(document.getElementById('token-fill').style.width) === 0 &&
@@ -198,33 +198,33 @@ check('BACK P1 back from a block-adding stage removes the block and the tokens',
   const live = () => [...document.querySelectorAll('#ctx-stack .ctx-block')].filter(b => !b.hidden).length;
   const tok  = () => +document.getElementById('token-count').textContent.replace(/[^0-9]/g, '');
   document.getElementById('btn-reset').click();
-  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();   // stage 5
+  for (let i = 0; i < 6; i++) document.getElementById('btn-step').click();   // stage 6
+  const at6 = [live(), tok()];
+  document.getElementById('btn-back').click();                               // -> stage 5
   const at5 = [live(), tok()];
   document.getElementById('btn-back').click();                               // -> stage 4
   const at4 = [live(), tok()];
-  document.getElementById('btn-back').click();                               // -> stage 3
-  const at3 = [live(), tok()];
-  return at5[0] === 4 && at5[1] === 3652 && at4[0] === 3 && at4[1] === 3612
-      && at3[0] === 3 && at3[1] === 3612
-      && document.getElementById('progress-text').textContent === 'Step 3 of 14';
+  return at6[0] === 4 && at6[1] === 3652 && at5[0] === 3 && at5[1] === 3612
+      && at4[0] === 3 && at4[1] === 3612
+      && document.getElementById('progress-text').textContent === 'Step 4 of 15';
 })()`));
 check('BACK P1 back all the way returns to stage 0 and then no-ops', await ev(`(() => {
   for (let i = 0; i < 12; i++) document.getElementById('btn-back').click();
   const at0 = document.getElementById('progress-text').textContent;
   document.getElementById('btn-back').click();                               // no-op
-  return at0 === 'Step 0 of 14' &&
-    document.getElementById('progress-text').textContent === 'Step 0 of 14' &&
+  return at0 === 'Step 0 of 15' &&
+    document.getElementById('progress-text').textContent === 'Step 0 of 15' &&
     document.getElementById('btn-back').disabled === true &&
     [...document.querySelectorAll('#ctx-stack .ctx-block')].every(b => b.hidden) &&
     document.getElementById('token-count').textContent === '0 tokens';
 })()`));
 check('BACK P1 the caption and stage label follow a backward step', await ev(`(() => {
   document.getElementById('btn-reset').click();
-  for (let i = 0; i < 6; i++) document.getElementById('btn-step').click();
+  for (let i = 0; i < 7; i++) document.getElementById('btn-step').click();
   const fwd = document.getElementById('stage-label').textContent;
   document.getElementById('btn-back').click();
   const back = document.getElementById('stage-label').textContent;
-  return fwd !== back && /Step 5/.test(back) &&
+  return fwd !== back && /Step 6/.test(back) &&
     document.getElementById('caption').textContent.length > 60;
 })()`));
 check('BACK P1 Back halts autoplay, as Step does', await ev(`(() => {
@@ -239,14 +239,14 @@ await ev(`document.getElementById('btn-reset').click();
           document.activeElement.blur(); window.scrollTo({top:0, behavior:'instant'});`);
 await key('ArrowLeft', 'ArrowLeft', 37); await sleep(120);
 check('BACK P1 ArrowLeft steps back, mirroring ArrowRight',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 3 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 3 of 15');
 await key('ArrowRight', 'ArrowRight', 39); await sleep(120);
 check('BACK P1 the keyboard hint advertises the back shortcut', await ev(`(() => {
   const t = document.querySelector('.kbd-hint').textContent;
   return /back/i.test(t) && t.includes('←') && t.includes('→');
 })()`));
 check('BACK P1 ArrowRight still steps forward',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 4 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 4 of 15');
 check('BACK P1 the deep-dive boundary still swallows ArrowLeft (it is not the sim)', await ev(`(() => {
   const before = document.getElementById('progress-text').textContent;
   const line = document.querySelector('#pseudo .pl[data-sub]');
@@ -268,7 +268,7 @@ await sleep(1500);
 const during = await ev(`({p: document.getElementById('progress-text').textContent,
                            b: document.getElementById('btn-play').textContent.trim()})`);
 check('Play advances stages automatically and the button becomes Pause',
-  during.p !== 'Step 0 of 14' && /Pause/i.test(during.b),
+  during.p !== 'Step 0 of 15' && /Pause/i.test(during.b),
   JSON.stringify(during));
 await ev(`document.getElementById('btn-play').click()`);
 check('Pause halts progression', await ev(`(async () => {
@@ -302,21 +302,21 @@ await ev(`document.getElementById('btn-reset').click(); document.activeElement.b
 await key('ArrowRight', 'ArrowRight', 39); await sleep(100);
 await key('ArrowRight', 'ArrowRight', 39); await sleep(100);
 check('ArrowRight steps with no control focused',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 2 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 2 of 15');
 
 // the regression that was fixed: shortcuts used to die once a button had focus
 await ev(`document.getElementById('btn-step').focus()`);
 await key('ArrowRight', 'ArrowRight', 39); await sleep(100);
 check('ArrowRight still steps while a button holds focus',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 3 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 3 of 15');
 await key('r', 'KeyR', 82); await sleep(100);
 check('R resets while a button holds focus',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 0 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 0 of 15');
 
 await ev(`document.getElementById('speed').focus()`);
 await key('r', 'KeyR', 82); await sleep(100);
 check('shortcuts stay out of the way when the select has focus',
-  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 0 of 14');
+  (await ev(`document.getElementById('progress-text').textContent`)) === 'Step 0 of 15');
 
 await ev(`document.activeElement.blur()`);
 await key(' ', 'Space', 32); await sleep(400);
@@ -353,8 +353,8 @@ check('decorative diagram bits are hidden from assistive tech', await ev(`
 console.log('\n── Acceptance: every concept readable without touching the controls');
 await load(1280, 900);
 const text = await ev(`document.body.innerText`);
-check('static walkthrough lists all 14 steps of the turn', await ev(`
-  document.querySelectorAll('#walkthrough-list li').length === 14`));
+check('static walkthrough lists all 15 steps of the turn', await ev(`
+  document.querySelectorAll('#walkthrough-list li').length === 15`));
 check('walkthrough prose is populated, not empty shells', await ev(`
   [...document.querySelectorAll('#walkthrough-list li .wc')].every(e => e.textContent.trim().length > 60)`));
 const concepts = {
@@ -465,7 +465,7 @@ const reveal = await ev(`(async () => {
   document.getElementById('btn-reset').click();
   const b = document.querySelector('#ctx-stack .b-sys');
   const s = document.getElementById('btn-step');
-  s.click(); s.click(); s.click();                       // stage 3 appends 3 blocks
+  s.click(); s.click(); s.click(); s.click();            // stage 4 appends the system prompt
   const immediate = { hidden: b.hidden, hasIn: b.classList.contains('in') };
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   return { immediate, after: { hasIn: b.classList.contains('in') } };
@@ -523,7 +523,7 @@ check('P3 wires redraw when the diagram resizes without a window resize', await 
 check('P3 the packet is re-placed on a diagram-only resize too', await ev(`(async () => {
   const grid = document.querySelector('.sim-grid');
   document.getElementById('btn-reset').click();
-  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();   // stage 4 has a packet
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();   // stage 5 has a packet
   const p = document.getElementById('packet'), d = document.getElementById('diagram');
   grid.style.gridTemplateColumns = 'minmax(0,3fr) minmax(0,7fr)';
   await new Promise(r => setTimeout(r, 350));
@@ -534,12 +534,12 @@ check('P3 the packet is re-placed on a diagram-only resize too', await ev(`(asyn
 })()`));
 
 // (4) step counter denominator
-check('P4 counter runs "Step 1..14 of 14" then "Complete"', await ev(`(() => {
+check('P4 counter runs "Step 1..15 of 15" then "Complete"', await ev(`(() => {
   document.getElementById('btn-reset').click();
-  if (document.getElementById('progress-text').textContent !== 'Step 0 of 14') return false;
-  for (let i = 1; i <= 14; i++) {
+  if (document.getElementById('progress-text').textContent !== 'Step 0 of 15') return false;
+  for (let i = 1; i <= 15; i++) {
     document.getElementById('btn-step').click();
-    if (document.getElementById('progress-text').textContent !== 'Step ' + i + ' of 14') return false;
+    if (document.getElementById('progress-text').textContent !== 'Step ' + i + ' of 15') return false;
   }
   document.getElementById('btn-step').click();
   return document.getElementById('progress-text').textContent === 'Complete';
@@ -554,14 +554,14 @@ await sleep(250);
 const immediatePlay = await ev(`document.getElementById('progress-text').textContent`);
 await ev(`document.getElementById('btn-play').click()`);
 check('P5 Play from Ready advances at once instead of waiting a full interval',
-  immediatePlay === 'Step 1 of 14', `saw "${immediatePlay}" after 250ms at Slow (4s interval)`);
+  immediatePlay === 'Step 1 of 15', `saw "${immediatePlay}" after 250ms at Slow (4s interval)`);
 
 // (6) no dangling arrow in the stage-3 caption
-check('P6 stage 3 caption has no trailing arrow', await ev(`(() => {
+check('P6 the assembly caption has no trailing arrow', await ev(`(() => {
   document.getElementById('btn-reset').click();
-  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
   const c = document.getElementById('caption').textContent.trim();
-  return !/[→↳➜]/.test(c) && /context window panel/i.test(c);
+  return !/[→↳➜]/.test(c) && /registry lookup/i.test(c);
 })()`));
 check('P6 no stray arrows anywhere in the walkthrough prose',
   await ev(`!/[→]/.test(document.getElementById('walkthrough-list').textContent)`));
@@ -571,8 +571,8 @@ check('P8 packet labels derive their token totals from the stack', await ev(`(()
   const step = n => { document.getElementById('btn-reset').click();
     for (let i = 0; i < n; i++) document.getElementById('btn-step').click();
     return document.getElementById('packet').textContent; };
-  return step(4) === 'full context · 3.6K tokens'
-      && step(11) === 'updated context · 3.8K tokens';
+  return step(5) === 'full context · 3.6K tokens'
+      && step(12) === 'updated context · 3.8K tokens';
 })()`));
 check('P8 no unresolved {TOKENS} placeholder leaks into the page', await ev(`(() => {
   document.getElementById('btn-reset').click();
@@ -593,7 +593,7 @@ const bodyText9 = await ev(`document.body.innerText`);
 check('P9 no contradictory file counts anywhere', !/14 files|14 items/.test(bodyText9));
 check('P9 stage 9 no longer promises sizes that the sample does not show', await ev(`(() => {
   document.getElementById('btn-reset').click();
-  for (let i = 0; i < 9; i++) document.getElementById('btn-step').click();
+  for (let i = 0; i < 10; i++) document.getElementById('btn-step').click();
   const c = document.getElementById('caption').textContent;
   return /names and folders/.test(c) && !/sizes/.test(c);
 })()`));
@@ -609,10 +609,10 @@ check('P11 context stack changes are announced via a live region', await ev(`(()
   if (s.getAttribute('aria-live') !== 'polite') return false;
   document.getElementById('btn-reset').click();
   const at0 = s.textContent;
-  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
-  const at3 = s.textContent;
+  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
+  const at4 = s.textContent;
   for (let i = 0; i < 7; i++) document.getElementById('btn-step').click();
-  return at0 === '0 blocks, 0 tokens' && at3 === '3 blocks, 3,612 tokens'
+  return at0 === '0 blocks, 0 tokens' && at4 === '3 blocks, 3,612 tokens'
       && s.textContent === '5 blocks, 3,832 tokens';
 })()`));
 check('P11 the live summary is visually hidden but not display:none', await ev(`(() => {
@@ -749,7 +749,7 @@ await load(1280, 950, [{ name: 'prefers-reduced-motion', value: 'reduce' }]);
 check('P1 under reduced motion blocks are revealed synchronously (no rAF hop)', await ev(`(() => {
   document.getElementById('btn-reset').click();
   const b = document.querySelector('#ctx-stack .b-sys');
-  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
   return !b.hidden && b.classList.contains('in');
 })()`));
 check('no console errors in the reduced-motion patch run', errs().length === 0, errText());
@@ -883,13 +883,13 @@ check('AC: the walkthrough links down to the deep dive and the target exists', a
   !!document.getElementById('deep-dive')`));
 check('AC: every simulation step number cited by a card exists and matches its subject', await ev(`(() => {
   const steps = [...document.querySelectorAll('#walkthrough-list li .wl')].map(e => e.textContent);
-  if (steps.length !== 14) return false;
+  if (steps.length !== 15) return false;
   const want = {
-    context:  [[3,'Context assembly'], [10,'Result appended']],
-    registry: [[7,'Validate & authorize']],
-    executor: [[8,'Execution'], [9,'Result captured']],
-    api:      [[4,'Model call #1'], [11,'Model call #2']],
-    loop:     [[11,'Model call #2'], [13,'Answer returned']]
+    context:  [[4,'Context assembly'], [11,'Result appended']],
+    registry: [[3,'Tool catalog'], [8,'Validate & authorize']],
+    executor: [[9,'Execution'], [10,'Result captured']],
+    api:      [[5,'Model call #1'], [12,'Model call #2']],
+    loop:     [[12,'Model call #2'], [14,'Answer returned']]
   };
   return Object.keys(want).every(sub => {
     const xref = document.querySelector('.sub-card[data-sub="' + sub + '"] .sc-xref').textContent;
@@ -1023,7 +1023,7 @@ check('MX the simulation shortcuts still work from outside the deep dive', await
   document.getElementById('btn-reset').click();
   document.body.focus();
   document.body.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true, cancelable:true}));
-  return document.getElementById('progress-text').textContent === 'Step 1 of 14';
+  return document.getElementById('progress-text').textContent === 'Step 1 of 15';
 })()`));
 
 console.log('\n── Deep dive: responsive, reduced motion, no-JS');
@@ -1103,7 +1103,7 @@ const walkTops = `(() => {
   const top = () => Math.round(c.getBoundingClientRect().top + window.scrollY);
   document.getElementById('btn-reset').click();
   const tops = [top()];
-  for (let i = 0; i < 15; i++) { document.getElementById('btn-step').click(); tops.push(top()); }
+  for (let i = 0; i < 16; i++) { document.getElementById('btn-step').click(); tops.push(top()); }
   document.getElementById('btn-step').click();           // past the end
   tops.push(top());
   return { unique: [...new Set(tops)].length, spread: Math.max(...tops) - Math.min(...tops), tops };
@@ -1112,7 +1112,7 @@ const walkTops = `(() => {
 for (const w of [1200, 768, 400]) {
   await load(w, 900);
   const r = await ev(walkTops);
-  check(`CAP controls stay at a fixed y across all 16 stages @${w}px`,
+  check(`CAP controls stay at a fixed y across all 17 stages @${w}px`,
     r.unique === 1, `${r.unique} distinct positions, ${r.spread}px spread: ${JSON.stringify(r.tops)}`);
 }
 
@@ -1127,7 +1127,7 @@ check('CAP the pinned height is >= the tallest caption at this width', await ev(
   const pinned = parseFloat(box.style.minHeight);
   document.getElementById('btn-reset').click();
   let tallest = 0;
-  for (let i = 0; i <= 15; i++) {
+  for (let i = 0; i <= 16; i++) {
     const h = document.getElementById('caption').getBoundingClientRect().height;
     if (h > tallest) tallest = h;
     document.getElementById('btn-step').click();
@@ -1181,7 +1181,7 @@ for (const w of [769, 800, 850, 900, 1000, 1100, 1400]) {
     const top = () => c.getBoundingClientRect().top + window.scrollY;
     document.getElementById('btn-reset').click();
     const tops = [top()];
-    for (let i = 0; i < 15; i++) { document.getElementById('btn-step').click(); tops.push(top()); }
+    for (let i = 0; i < 16; i++) { document.getElementById('btn-step').click(); tops.push(top()); }
     return +(Math.max(...tops) - Math.min(...tops)).toFixed(2);
   })()`);
   if (d !== 0) drift += `${w}px:${d}px `;
@@ -1192,7 +1192,7 @@ check('CAP the diagram no longer stretches as the context panel grows', await ev
   const diag = document.getElementById('diagram');
   document.getElementById('btn-reset').click();
   const hs = [];
-  for (let i = 0; i <= 15; i++) {
+  for (let i = 0; i <= 16; i++) {
     hs.push(Math.round(diag.getBoundingClientRect().height));
     document.getElementById('btn-step').click();
   }
@@ -1351,20 +1351,20 @@ check('R2/C12 tool execution is no longer stated as unconditionally fast',
   /often milliseconds, though unbounded without a timeout/i.test(dd2));
 check('R2/C13 cards link to walkthrough anchors that exist', await ev(`(() => {
   const as = [...document.querySelectorAll('#deep-dive .sc-xref a[href^="#walk-"]')];
-  return as.length >= 12 && as.every(a => !!document.getElementById(a.getAttribute('href').slice(1)));
+  return as.length >= 13 && as.every(a => !!document.getElementById(a.getAttribute('href').slice(1)));
 })()`));
 check('R2/C13 walkthrough items carry walk-N ids matching their step numbers', await ev(`(() => {
   const lis = [...document.querySelectorAll('#walkthrough-list li')];
-  return lis.length === 14 && lis.every((li, i) => li.id === 'walk-' + (i + 1));
+  return lis.length === 15 && lis.every((li, i) => li.id === 'walk-' + (i + 1));
 })()`));
 check('R2/C13 the step-7 split between registry and executor is called out', await ev(`
   /validation half/i.test(document.getElementById('card-registry').textContent) &&
-  /permission half/i.test(document.getElementById('card-executor').textContent)`));
+  /permission half of step 8/i.test(document.getElementById('card-executor').textContent)`));
 check('R2/C13 extended step lists are present (assembler 5+12, loop 12, api 6+13)', await ev(`(() => {
   const nums = id => [...document.querySelectorAll('#' + id + ' .sc-xref a')]
     .map(a => +a.getAttribute('href').replace('#walk-', '')).sort((x, y) => x - y).join();
-  return nums('card-context') === '3,5,10,12' && nums('card-loop') === '11,12,13'
-      && nums('card-api') === '4,6,11,13';
+  return nums('card-context') === '4,6,11,13' && nums('card-loop') === '12,13,14'
+      && nums('card-api') === '5,7,12,14' && nums('card-registry') === '3,8';
 })()`));
 check('R2/C14 glossary gained the new terms the section uses', await ev(`(() => {
   const t = [...document.querySelectorAll('dl.gloss dt')].map(d => d.textContent.toLowerCase());
@@ -1556,9 +1556,9 @@ check('AC P2 all eight component definitions are in the DOM statically', await e
     d.textContent.length > 200)`));
 check('P2 the five knowledge tiers each state a loading rule', await ev(`(() => {
   const tiers = [...document.querySelectorAll('.tier')];
-  return tiers.length === 5 &&
+  return tiers.length === 6 &&
     tiers.every(t => t.querySelector('.t-rule').textContent.trim().length > 5) &&
-    ['identity','project','skill','memory','work']
+    ['identity','tooldefs','project','skill','memory','work']
       .every(l => tiers.some(t => t.getAttribute('data-layer') === l));
 })()`));
 check('P2 annotated skill file shows metadata and instructions', await ev(`(() => {
@@ -1669,7 +1669,7 @@ check('AC P2 compaction visibly removes blocks and shrinks the budget', await ev
   const goneIds = ['read1','edit1','test1','fix1']
     .every(id => !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
   return afterN < beforeN && afterT < beforeT && summaryShown && goneIds
-      && beforeT === 6128 && afterT === 4148;
+      && beforeT === 7928 && afterT === 5948;
 })()`));
 check('AC P2 the skill block is unloaded again at the end of the run', await ev(`(() => {
   document.getElementById('btn-reset').click();
@@ -1685,7 +1685,7 @@ check('P2 context blocks are colour-coded by layer, all five layers used', await
   for (let i = 0; i < 19; i++) document.getElementById('btn-step').click();
   const layers = new Set([...document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)')]
     .map(b => b.getAttribute('data-layer')));
-  return ['identity','project','skill','memory','work'].every(l => layers.has(l));
+  return ['identity','tooldefs','project','skill','memory','work'].every(l => layers.has(l));
 })()`));
 
 // AC: the permission gate must read as a policy stop
@@ -1831,7 +1831,7 @@ check('GFX P2 compaction visibly animates blocks out before removing them', awai
   await new Promise(r => setTimeout(r, 450));
   const after = document.querySelectorAll('#ctx-stack .ctx-block.leaving').length;
   const live = document.querySelectorAll('#ctx-stack .ctx-block').length;
-  return collapsing === 4 && after === 0 && live === 9;
+  return collapsing === 4 && after === 0 && live === 10;
 })()`));
 check('GFX P2 the skill-load stage animates its block in', await ev(`(() => {
   document.getElementById('btn-reset').click();
@@ -1845,6 +1845,123 @@ check('GFX P2 the skill-load stage animates its block in', await ev(`(() => {
 
 
 
+
+console.log('\n── Tool-definition provenance (page 1)');
+await load(1280, 950);
+check('TOOLS P1 a dedicated stage shows the catalog arriving from the environment', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 3; i++) document.getElementById('btn-step').click();
+  const label = document.getElementById('stage-label').textContent;
+  const pk = document.getElementById('packet');
+  return /Tool catalog/i.test(label) && pk.classList.contains('visible')
+      && /tool catalog/i.test(pk.textContent)
+      && document.getElementById('actor-tools').className.indexOf('hl-') === -1;
+})()`));
+check('TOOLS P1 the packet travels from Tools to the Harness', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 2; i++) document.getElementById('btn-step').click();
+  const pk = document.getElementById('packet');
+  document.getElementById('btn-step').click();                 // stage 3
+  const start = pk.getBoundingClientRect();
+  await new Promise(r => setTimeout(r, 900));
+  const end = pk.getBoundingClientRect();
+  const tools = document.getElementById('actor-tools').getBoundingClientRect();
+  const harness = document.getElementById('actor-harness').getBoundingClientRect();
+  // starts nearer Tools, ends nearer the Harness
+  const dTools = Math.abs(start.top - tools.top), dHarness = Math.abs(end.top - harness.top);
+  return dTools < Math.abs(start.top - harness.top) && dHarness < Math.abs(end.top - tools.top);
+})()`));
+check('TOOLS P1 the tool-definitions block enters at that stage, before the system prompt', await ev(`(() => {
+  const live = () => [...document.querySelectorAll('#ctx-stack .ctx-block')].filter(b => !b.hidden)
+    .map(b => b.querySelector('.bl').textContent);
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 2; i++) document.getElementById('btn-step').click();
+  const before = live();
+  document.getElementById('btn-step').click();                 // stage 3
+  const at3 = live();
+  document.getElementById('btn-step').click();                 // stage 4
+  const at4 = live();
+  return before.length === 0 && at3.length === 1 && at3[0] === 'Tool definitions'
+      && at4.length === 3 && at4[0] === 'System prompt' && at4[1] === 'Tool definitions';
+})()`));
+check('TOOLS P1 the captions explain provenance and registry-lookup routing', await ev(`(() => {
+  const cap = n => { document.getElementById('btn-reset').click();
+    for (let i = 0; i < n; i++) document.getElementById('btn-step').click();
+    return document.getElementById('caption').textContent; };
+  const c3 = cap(3), c4 = cap(4);
+  return /tool registry/i.test(c3) && /argument schema/i.test(c3)
+      && /reading those descriptions/i.test(c4) && /registry lookup/i.test(c4);
+})()`));
+check('TOOLS P1 tool definitions persist for the rest of the run', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let always = true;
+  for (let i = 1; i <= 16; i++) {
+    document.getElementById('btn-step').click();
+    if (i < 3) continue;
+    const blk = [...document.querySelectorAll('#ctx-stack .ctx-block')]
+      .find(b => b.querySelector('.bl').textContent === 'Tool definitions');
+    if (!blk || blk.hidden) always = false;
+  }
+  return always;
+})()`));
+
+console.log('\n── Tool-definition provenance (page 2)');
+await load2(1280, 950);
+check('TOOLS P2 a tool-definitions block exists and is loaded at assembly', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  const before = document.querySelectorAll('#ctx-stack .ctx-block[data-layer="tooldefs"]').length;
+  document.getElementById('btn-step').click();                 // stage 1
+  const blk = document.querySelector('#ctx-stack .ctx-block[data-layer="tooldefs"]');
+  return before === 0 && !!blk &&
+    blk.querySelector('.bl').textContent === 'Tool definitions' &&
+    /schemas/i.test(blk.querySelector('.bd').textContent);
+})()`));
+check('TOOLS P2 it never leaves, not even through compaction or skill release', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let always = true;
+  for (let i = 1; i <= 21; i++) {
+    document.getElementById('btn-step').click();
+    if (!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-layer="tooldefs"]')) always = false;
+  }
+  return always;
+})()`));
+check('TOOLS P2 the budget arithmetic accounts for it and never overflows', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let maxPct = 0, ok = true;
+  for (let i = 1; i <= 21; i++) {
+    document.getElementById('btn-step').click();
+    const pct = parseFloat(document.getElementById('token-fill').style.width);
+    if (pct > 100) ok = false;
+    if (pct > maxPct) maxPct = pct;
+  }
+  return ok && maxPct > 70 && maxPct < 100;                    // headroom kept, bar still meaningful
+})()`));
+check('TOOLS P2 the compaction drop stays legible on the meter', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 12; i++) document.getElementById('btn-step').click();
+  const before = parseFloat(document.getElementById('token-fill').style.width);
+  document.getElementById('btn-step').click();
+  const after = parseFloat(document.getElementById('token-fill').style.width);
+  return before - after > 15;                                  // a clearly visible fall
+})()`));
+check('TOOLS P2 the Tools component lights when its registry is read', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  document.getElementById('btn-step').click();
+  return document.querySelector('#diagram .actor[data-comp="tools"]').classList.contains('on');
+})()`));
+check('TOOLS P2 legend and tiers both name the new layer', await ev(`(() => {
+  const legend = [...document.querySelectorAll('.legend li')].map(e => e.textContent.trim());
+  const tiers = [...document.querySelectorAll('.tier .t-name')].map(e => e.textContent);
+  return legend.some(l => /^Tool definitions/.test(l)) && tiers.includes('Tool definitions') &&
+    legend.length === 6;
+})()`));
+check('TOOLS P2 the caption states registry-lookup routing at the assembly moment', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  document.getElementById('btn-step').click();
+  const c = document.getElementById('caption').textContent;
+  return /reading those descriptions/i.test(c) && /routes by name/i.test(c);
+})()`));
+
 console.log('\n── Page 2: round-3 content and correctness fixes');
 await load2(1280, 950);
 check('R3/A1 each knowledge tier renders its own layer colour, not grey', await ev(`(() => {
@@ -1855,7 +1972,7 @@ check('R3/A1 each knowledge tier renders its own layer colour, not grey', await 
     seen.add(c);
     return c !== grey && parseFloat(getComputedStyle(t).borderLeftWidth) >= 4;
   });
-  return ok && seen.size === 5;                            // five distinct rails
+  return ok && seen.size === 6;                            // six distinct rails
 })()`));
 check('R3/A2 Skill has its own colour, distinct from Model', await ev(`(() => {
   const v = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -1902,7 +2019,7 @@ check('R3/A9 one visible name per concept: Project knowledge', await ev(`(() => 
          /holds project/i.test(document.querySelector('#actor-semantic .sub').textContent);
 })()`));
 check('R3/A10 the components-to-tiers bridge is stated', await ev(`
-  /Three of the components/.test(document.getElementById('semantic').textContent) &&
+  /Four of the components/.test(document.getElementById('semantic').textContent) &&
   /never enter the context/.test(document.getElementById('semantic').textContent)`));
 check('R3/A11 the budget is marked as illustrative', await ev(`
   /Scaled down so the changes are visible/.test(document.querySelector('.ctx-meter').textContent) &&
@@ -2124,7 +2241,7 @@ check('BACK P2 back from stage N lands at N-1 with the panel in sync', await ev(
   const at6 = [live(), tok()];
   document.getElementById('btn-back').click();                               // -> stage 5
   const at5 = [live(), tok()];
-  return at6[0] === 6 && at5[0] === 5
+  return at6[0] === 7 && at5[0] === 6
       && at6[1] - at5[1] === 800                       // the skill block's tokens
       && document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length === 0
       && document.getElementById('progress-text').textContent === 'Step 5 of 20';
@@ -2151,9 +2268,9 @@ check('BACK P2 stepping back across compaction restores the pre-compaction panel
   const fourBack = ['read1','edit1','test1','fix1'].every(id =>
     !!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
   const summaryGone = !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="summary"]');
-  return before.n === 12 && before.t === 6128
-      && compacted.n === 9 && compacted.t === 4148
-      && restored.n === 12 && restored.t === 6128
+  return before.n === 13 && before.t === 7928
+      && compacted.n === 10 && compacted.t === 5948
+      && restored.n === 13 && restored.t === 7928
       && fourBack && summaryGone;
 })()`));
 check('BACK P2 backward takes the instant path (no packet flight queued)', await ev(`(() => {
@@ -2299,7 +2416,7 @@ check('MX P2 JS off: all eight component definitions are visible',
   (noJs2.match(/class="anat-def"/g) || []).length === 8 &&
   !/class="anat-def is-open"/.test(noJs2) && !/anat js/.test(noJs2));
 check('MX P2 JS off: tiers, skill file and glossary all present',
-  (noJs2.match(/class="tier"/g) || []).length === 5 &&
+  (noJs2.match(/class="tier"/g) || []).length === 6 &&
   /when_to_use/.test(noJs2) && /Permission policy/.test(noJs2));
 check('MX P2 JS off: the notice admits the walkthrough is empty too, not just the sim',
   /<noscript>/.test(noJs2) && /JavaScript is turned off/.test(noJs2) &&
@@ -2326,9 +2443,9 @@ check('AC page 1 keeps every section and control it had before page 2 existed', 
   return want.every(id => ids.includes(id))
       && document.querySelectorAll('#pseudo .pl').length === 26
       && document.querySelectorAll('.sub-card').length === 5
-      && document.querySelectorAll('#walkthrough-list li').length === 14
+      && document.querySelectorAll('#walkthrough-list li').length === 15
       && ['btn-play','btn-back','btn-step','btn-reset','speed'].every(i => !!document.getElementById(i))
-      && document.getElementById('progress-text').textContent === 'Step 0 of 14';
+      && document.getElementById('progress-text').textContent === 'Step 0 of 15';
 })()`));
 await load(1280, 950);
 

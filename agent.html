@@ -127,6 +127,7 @@
   .tier .t-rule{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--c)}
   .tier .t-body{font-size:.87rem;color:var(--muted);margin-top:3px}
   .tier[data-layer="identity"]{--c:var(--c-identity)}
+  .tier[data-layer="tooldefs"]{--c:var(--c-tools)}
   .tier[data-layer="project"]{--c:var(--c-semantic)}
   .tier[data-layer="skill"]{--c:var(--c-skill)}
   .tier[data-layer="memory"]{--c:var(--c-memory)}
@@ -229,6 +230,7 @@
   .ctx-block .bd{font-size:.71rem;color:var(--muted)}
   .ctx-block .bt{font-size:.67rem;color:var(--muted);float:right;font-variant-numeric:tabular-nums;padding-left:8px}
   .ctx-block[data-layer="identity"]{--c:var(--c-identity)}
+  .ctx-block[data-layer="tooldefs"]{--c:var(--c-tools)}
   .ctx-block[data-layer="project"]{--c:var(--c-semantic)}
   .ctx-block[data-layer="skill"]{--c:var(--c-skill)}
   .ctx-block[data-layer="memory"]{--c:var(--c-memory)}
@@ -402,6 +404,7 @@
         </div>
         <ul class="legend">
           <li><span class="swatch" style="--c:var(--c-identity)"></span>Identity</li>
+          <li><span class="swatch" style="--c:var(--c-tools)"></span>Tool definitions</li>
           <li><span class="swatch" style="--c:var(--c-semantic)"></span>Project knowledge</li>
           <li><span class="swatch" style="--c:var(--c-skill)"></span>Skill</li>
           <li><span class="swatch" style="--c:var(--c-memory)"></span>Memory</li>
@@ -494,6 +497,10 @@
         <div class="t-head"><span class="t-name">Identity</span><span class="t-rule">always loaded</span></div>
         <div class="t-body">Role, rules, refusals. Present from the first call to the last, never evicted. Keep it short: you pay for it every time.</div>
       </div>
+      <div class="tier" data-layer="tooldefs">
+        <div class="t-head"><span class="t-name">Tool definitions</span><span class="t-rule">always loaded</span></div>
+        <div class="t-body">Every callable function's name, description and argument schema. Resident for the same reason identity is: the model can only ask for a tool it can currently see described. Adding tools costs context on every call, which is why large agents scope their registry per task.</div>
+      </div>
       <div class="tier" data-layer="project">
         <div class="t-head"><span class="t-name">Project knowledge</span><span class="t-rule">loaded once per run</span></div>
         <div class="t-body">Conventions, architecture, domain vocabulary — true of this system regardless of task. Loaded at the start and kept, because nearly every step needs it.</div>
@@ -511,7 +518,7 @@
         <div class="t-body">The plan, the tool calls and their results. The only tier that grows without bound, and therefore the first thing compacted: superseded output is replaced by a short summary of what it established.</div>
       </div>
     </div>
-    <p style="margin-top:18px"><strong>How these tiers map to the eight components.</strong> Three of the components <em>are</em> tiers: identity, the semantic layer (which supplies the project-knowledge tier) and skills. Memory is a tier's <em>source</em> rather than a tier itself — it lives outside the context window and only the handful of notes it returns are loaded. The remaining four never enter the context as knowledge at all: the model and the harness are the machinery that reads and assembles it, tools produce the working transcript by executing, and the permission policy is enforced in code before execution and is never something the model reads.</p>
+    <p style="margin-top:18px"><strong>How these tiers map to the eight components.</strong> Four of the components <em>are</em> tiers: identity, the tool registry (whose definitions are resident all run), the semantic layer (which supplies the project-knowledge tier) and skills. Memory is a tier's <em>source</em> rather than a tier itself — it lives outside the context window and only the handful of notes it returns are loaded. The rest never enter the context as knowledge at all: the model and the harness are the machinery that reads and assembles it, tool <em>execution</em> produces the working transcript, and the permission policy is enforced in code before execution and is never something the model reads.</p>
 
     <div class="callout">
       <p><strong>The architect's version:</strong> this is a cache hierarchy. Identity is pinned; project knowledge is loaded on run start; skills are demand-paged on match; the working transcript is the evictable region. Compaction is eviction with a lossy summary in place of the discarded pages &mdash; and like any lossy cache, what it drops is a design decision you should make deliberately rather than discover in production.</p>
@@ -610,6 +617,7 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
   /* ---------- Context blocks, tagged by knowledge layer ---------- */
   var BLOCKS = {
     identity:{layer:"identity", label:"Agent identity",       detail:"role, hard rules, refusals",              tokens:900},
+    tooldefs:{layer:"tooldefs", label:"Tool definitions",     detail:"names, descriptions, argument schemas",    tokens:1800},
     task:    {layer:"work",     label:"User task",            detail:"“upgrade the payments SDK to v3”", tokens:18},
     proj:    {layer:"project",  label:"Project knowledge",    detail:"repo conventions, architecture notes",    tokens:1500},
     mem:     {layer:"memory",   label:"Recalled memory",      detail:"last upgrade broke the webhook signer",   tokens:140},
@@ -628,7 +636,7 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
     smoke:   {layer:"work",     label:"Tool result: smoke ok",detail:"payments endpoint healthy",               tokens:160},
     report:  {layer:"work",     label:"Report",               detail:"what changed, and why it first failed",   tokens:200}
   };
-  var BUDGET = 8000;
+  var BUDGET = 10000;   // raised: tool definitions are resident all run
 
   /* ---------- Stages. add/drop are cumulative; drop is what makes
        compaction and skill-unloading visible in the panel. ---------- */
@@ -636,8 +644,8 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
     {label:"Ready", comps:[], add:[], drop:[],
      caption:"Press <strong>Play</strong> to watch the whole task run, or <strong>Step</strong> to move through it at your own pace."},
 
-    {label:"Step 1 · The command", comps:["harness","identity"], move:{from:"identity",to:"harness",text:"identity"}, add:["identity","task"],
-     caption:"You type one instruction and walk away. The harness starts a run and loads the agent’s <strong>identity</strong> — role, hard rules, refusals. This block is always resident: it is in the first model call and every one after it."},
+    {label:"Step 1 · The command", comps:["harness","identity","tools"], move:{from:"identity",to:"harness",text:"identity"}, add:["identity","tooldefs","task"],
+     caption:"You type one instruction and walk away. The harness starts a run and assembles the always-resident part of the context: the agent’s <strong>identity</strong> — role, hard rules, refusals — and the <strong>tool definitions</strong> read from its registry, every function it is willing to execute with a name, a description and an argument schema. The model will choose tools by reading those descriptions; the harness routes by name. Both blocks are re-sent on every iteration of the run."},
 
     {label:"Step 2 · Consulting project knowledge", comps:["semantic","harness"], move:{from:"semantic",to:"harness",text:"project docs"}, add:["proj"],
      caption:"Before planning anything, the agent loads durable <strong>project knowledge</strong>: repository conventions and architecture notes, true of this codebase whatever the task. Loaded once, kept for the whole run."},

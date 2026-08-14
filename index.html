@@ -333,7 +333,7 @@
             <option value="1" selected>Normal</option>
             <option value="1.8">Fast</option>
           </select>
-          <span class="progress" id="progress-text">Step 0 of 14</span>
+          <span class="progress" id="progress-text">Step 0 of 15</span>
         </div>
         <div class="progress-bar" aria-hidden="true"><div id="progress-fill"></div></div>
         <p class="kbd-hint"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> back/step · <kbd>R</kbd> reset</p>
@@ -478,7 +478,7 @@
           <p class="sc-job"><strong>Job:</strong> build the block of text that goes into every request &mdash; system prompt, tool definitions, conversation history, newest message &mdash; and decide what to drop when it stops fitting.</p>
           <p>This is where cost and latency are actually determined, because the block is rebuilt and re-sent on every iteration and its size multiplies across the loop. Keeping the stable parts first (system prompt, then tool definitions) is what lets the provider serve a cached prefix, so the assembler's ordering is a billing decision as much as a formatting one. It is append-only within an iteration, which makes it auditable: the exact bytes sent can be logged verbatim. When the budget is exceeded something must be evicted, and what goes &mdash; oldest messages, largest tool results, or a summary standing in for both &mdash; is a product decision with no correct default.</p>
           <p class="sc-fail"><strong>Done badly:</strong> sessions that get vaguer the longer they run, because the assembler quietly dropped the instructions that mattered while keeping recent chatter.</p>
-          <p class="sc-xref">In the simulation: <a href="#walk-3">step 3</a>, <a href="#walk-5">step 5</a>, <a href="#walk-10">step 10</a>, <a href="#walk-12">step 12</a></p>
+          <p class="sc-xref">In the simulation: <a href="#walk-4">step 4</a>, <a href="#walk-6">step 6</a>, <a href="#walk-11">step 11</a>, <a href="#walk-13">step 13</a></p>
         </details>
 
         <details class="sub-card" id="card-registry" data-sub="registry">
@@ -486,7 +486,7 @@
           <p class="sc-job"><strong>Job:</strong> hold the catalogue of callable functions with their argument schemas, and reject anything requested that does not match one.</p>
           <p>This is the enforcement point for the trust boundary. A name that is not in the registry does not exist, no matter how confidently it was requested, and schema validation here is not a formality &mdash; it is the same input validation you would write for a public HTTP endpoint, because functionally that is what this is. Rejections happen inside the same <code>try</code> as execution, so they come back as ordinary results the model can correct itself from rather than aborting the run.</p>
           <p class="sc-fail"><strong>Done badly:</strong> a tool invoked with arguments nobody checked, and a stack trace from three layers down surfacing to the user as the assistant's answer.</p>
-          <p class="sc-xref">In the simulation: <a href="#walk-7">step 7</a> &mdash; this component owns the validation half of that step.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-3">step 3</a>, <a href="#walk-8">step 8</a> &mdash; this component owns the registry read and the validation half of step 8.</p>
         </details>
 
         <details class="sub-card" id="card-executor" data-sub="executor">
@@ -494,7 +494,7 @@
           <p class="sc-job"><strong>Job:</strong> actually run the requested tool under a permission check, a time limit and an output cap &mdash; and turn any failure into data.</p>
           <p>This is the only component with real side effects, so it is where blast radius is decided. It runs with some identity and some filesystem and network reach, and whatever those are is exactly what a mistaken or manipulated call can touch. Timeouts and output caps are containment rather than politeness: an unbounded command holds the loop open indefinitely, and unbounded output consumes the very budget the assembler is trying to manage. Note what the <code>try</code> encloses &mdash; lookup, validation and permission failures are captured on the same path as a crashing command, so none of them can end the run.</p>
           <p class="sc-fail"><strong>Done badly:</strong> a typo'd deletion running with the service's own privileges &mdash; or one verbose command whose output fills the context window and derails everything after it.</p>
-          <p class="sc-xref">In the simulation: <a href="#walk-7">step 7</a>, <a href="#walk-8">step 8</a>, <a href="#walk-9">step 9</a> &mdash; this component owns the permission half of step 7.</p>
+          <p class="sc-xref">In the simulation: <a href="#walk-8">step 8</a>, <a href="#walk-9">step 9</a>, <a href="#walk-10">step 10</a> &mdash; this component owns the permission half of step 8.</p>
         </details>
 
         <details class="sub-card" id="card-api" data-sub="api">
@@ -502,7 +502,7 @@
           <p class="sc-job"><strong>Job:</strong> make the HTTP request to the model service and hand back a parsed reply.</p>
           <p>One line in the loop, and almost all of the wall-clock time and nearly all of the bill. It is a network call to a third party, so it inherits every concern you would apply to any external dependency: timeouts, retries with backoff, rate-limit handling, and a circuit breaker for when the service degrades. It is also the natural instrumentation point &mdash; request size, response size, latency and cost per call all pass through here, and if you do not measure them here you will not measure them at all.</p>
           <p class="sc-fail"><strong>Done badly:</strong> a run that hangs forever because one upstream request had no timeout, or a bill nobody can attribute because per-call sizes were never recorded.</p>
-          <p class="sc-xref">In the simulation: <a href="#walk-4">step 4</a>, <a href="#walk-6">step 6</a>, <a href="#walk-11">step 11</a>, <a href="#walk-13">step 13</a></p>
+          <p class="sc-xref">In the simulation: <a href="#walk-5">step 5</a>, <a href="#walk-7">step 7</a>, <a href="#walk-12">step 12</a>, <a href="#walk-14">step 14</a></p>
         </details>
 
         <details class="sub-card" id="card-loop" data-sub="loop">
@@ -510,7 +510,7 @@
           <p class="sc-job"><strong>Job:</strong> decide whether to go round again, and guarantee that the loop always ends.</p>
           <p>The only natural exit is a reply containing no tool call, and that is a decision made by a non-deterministic remote service &mdash; which means it is not a guarantee. Every other stop condition is one you impose: an iteration ceiling, a token budget, a wall-clock deadline, a repeated-call detector. This component owns the state machine for the whole request, so cancellation and resumption belong here too. Treat &ldquo;the model will stop on its own&rdquo; as a happy path, not as a design.</p>
           <p class="sc-fail"><strong>Done badly:</strong> an agent that loops on the same failing command until somebody notices the spend graph.</p>
-          <p class="sc-xref">In the simulation: <a href="#walk-11">step 11</a>, <a href="#walk-12">step 12</a>, <a href="#walk-13">step 13</a></p>
+          <p class="sc-xref">In the simulation: <a href="#walk-12">step 12</a>, <a href="#walk-13">step 13</a>, <a href="#walk-14">step 14</a></p>
         </details>
       </div>
     </div>
@@ -576,29 +576,31 @@
      caption:"The user types <em>“What’s in this project?”</em> — something the model can’t know from training data. Answering will require looking at the actual files."},
     {label:"Step 2 · Message sent", actor:"harness", move:{from:"user",to:"harness",text:"user message"}, add:[],
      caption:"The message goes to the <strong>harness</strong> first — never straight to the model. The harness now has a job to run, not just text to forward."},
-    {label:"Step 3 · Context assembly", actor:"harness", move:null, add:["sys","tools","user1"],
-     caption:"The harness builds the <strong>context window</strong>: a system prompt (who the assistant is, the rules), definitions of every available tool, and the user’s message. That stack — shown in the context window panel — is everything the model will get to see."},
-    {label:"Step 4 · Model call #1", actor:"model", move:{from:"harness",to:"model",text:"full context · {TOKENS}"}, add:[],
+    {label:"Step 3 · Tool catalog", actor:"harness", move:{from:"tools",to:"harness",text:"tool catalog"}, add:["tools"],
+     caption:"First the harness reads its own <strong>tool registry</strong> — every function it is willing to execute, each with a name, a description and an argument schema. Those become the tool definitions, and they go into the context window before the model has seen anything at all."},
+    {label:"Step 4 · Context assembly", actor:"harness", move:null, add:["sys","user1"],
+     caption:"Around them the harness builds the rest of the <strong>context window</strong>: a system prompt (who the assistant is, the rules) and the user’s message. The model will pick a tool by <em>reading those descriptions</em> — and when it does, the harness routes the call by name, a registry lookup and nothing cleverer. That stack is everything the model gets to see."},
+    {label:"Step 5 · Model call #1", actor:"model", move:{from:"harness",to:"model",text:"full context · {TOKENS}"}, add:[],
      caption:"The harness sends the <em>entire</em> stack to the model API. Models are stateless — this bundle is the model’s whole world for this call."},
-    {label:"Step 5 · The model decides", actor:"model", move:null, add:["call1"],
+    {label:"Step 6 · The model decides", actor:"model", move:null, add:["call1"],
      caption:"The model reads everything and realizes it needs information it doesn’t have. So instead of answering, it writes a <strong>tool call</strong>: a structured request — <code>list_files(\".\")</code> — and stops."},
-    {label:"Step 6 · Tool call returned", actor:"harness", move:{from:"model",to:"harness",text:"tool call (JSON)"}, add:[],
+    {label:"Step 7 · Tool call returned", actor:"harness", move:{from:"model",to:"harness",text:"tool call (JSON)"}, add:[],
      caption:"The tool call comes back to the harness as plain structured text. Note what did <em>not</em> happen: the model didn’t touch a single file. It only asked."},
-    {label:"Step 7 · Validate & authorize", actor:"harness", move:null, add:[],
+    {label:"Step 8 · Validate & authorize", actor:"harness", move:null, add:[],
      caption:"The harness checks the request against the tool’s schema and its permission rules — is this tool allowed? does it need user approval? This safety gate lives entirely in the harness."},
-    {label:"Step 8 · Execution", actor:"tools", move:{from:"harness",to:"tools",text:"list_files(\".\")"}, add:[],
+    {label:"Step 9 · Execution", actor:"tools", move:{from:"harness",to:"tools",text:"list_files(\".\")"}, add:[],
      caption:"The <strong>harness executes the tool</strong> in the real environment — here, listing the project directory. The model is completely idle right now; it isn’t even running."},
-    {label:"Step 9 · Result captured", actor:"harness", move:{from:"tools",to:"harness",text:"file listing · stdout"}, add:[],
+    {label:"Step 10 · Result captured", actor:"harness", move:{from:"tools",to:"harness",text:"file listing · stdout"}, add:[],
      caption:"The file listing comes back to the harness: names and folders — raw output from the real world."},
-    {label:"Step 10 · Result appended", actor:"harness", move:null, add:["result1"],
+    {label:"Step 11 · Result appended", actor:"harness", move:null, add:["result1"],
      caption:"The harness appends the tool result to the context stack as a new message. The window just grew — every loop iteration makes the next model call a little bigger."},
-    {label:"Step 11 · Model call #2", actor:"model", move:{from:"harness",to:"model",text:"updated context · {TOKENS}"}, add:[],
+    {label:"Step 12 · Model call #2", actor:"model", move:{from:"harness",to:"model",text:"updated context · {TOKENS}"}, add:[],
      caption:"The harness calls the model <em>again</em>, re-sending everything — now including the tool result. This is the <strong>agentic loop</strong>: call, execute, append, call again."},
-    {label:"Step 12 · The answer", actor:"model", move:null, add:["ans"],
+    {label:"Step 13 · The answer", actor:"model", move:null, add:["ans"],
      caption:"This time the model has what it needs. It writes a plain-text answer describing the project — no tool call — which signals the loop can end."},
-    {label:"Step 13 · Answer returned", actor:"harness", move:{from:"model",to:"harness",text:"final text"}, add:[],
+    {label:"Step 14 · Answer returned", actor:"harness", move:{from:"model",to:"harness",text:"final text"}, add:[],
      caption:"The answer travels back to the harness, which sees there’s no further tool request — the turn is complete."},
-    {label:"Step 14 · Delivered", actor:"user", move:{from:"harness",to:"user",text:"answer"}, add:[],
+    {label:"Step 15 · Delivered", actor:"user", move:{from:"harness",to:"user",text:"answer"}, add:[],
      caption:"The harness delivers the answer to the user. One turn: 2 model calls, 1 tool execution, and a context window that grew at every step."},
     {label:"Done", actor:null, move:null, add:[],
      caption:"That’s the whole trick — repeated. Complex agent sessions are just this loop running many times: more tool calls, more results, an ever-growing context. Press <strong>Reset</strong> to run it again."}
