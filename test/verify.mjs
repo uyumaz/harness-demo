@@ -1669,7 +1669,7 @@ check('AC P2 compaction visibly removes blocks and shrinks the budget', await ev
   const goneIds = ['read1','edit1','test1','fix1']
     .every(id => !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
   return afterN < beforeN && afterT < beforeT && summaryShown && goneIds
-      && beforeT === 7928 && afterT === 5948;
+      && beforeT === 8228 && afterT === 6248;
 })()`));
 check('AC P2 the skill block is unloaded again at the end of the run', await ev(`(() => {
   document.getElementById('btn-reset').click();
@@ -1685,7 +1685,7 @@ check('P2 context blocks are colour-coded by layer, all five layers used', await
   for (let i = 0; i < 19; i++) document.getElementById('btn-step').click();
   const layers = new Set([...document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)')]
     .map(b => b.getAttribute('data-layer')));
-  return ['identity','tooldefs','project','skill','memory','work'].every(l => layers.has(l));
+  return ['identity','tooldefs','skillcat','project','skill','memory','work'].every(l => layers.has(l));
 })()`));
 
 // AC: the permission gate must read as a policy stop
@@ -1831,7 +1831,7 @@ check('GFX P2 compaction visibly animates blocks out before removing them', awai
   await new Promise(r => setTimeout(r, 450));
   const after = document.querySelectorAll('#ctx-stack .ctx-block.leaving').length;
   const live = document.querySelectorAll('#ctx-stack .ctx-block').length;
-  return collapsing === 4 && after === 0 && live === 10;
+  return collapsing === 4 && after === 0 && live === 11;
 })()`));
 check('GFX P2 the skill-load stage animates its block in', await ev(`(() => {
   document.getElementById('btn-reset').click();
@@ -1959,7 +1959,98 @@ check('TOOLS P2 the caption states registry-lookup routing at the assembly momen
   document.getElementById('btn-reset').click();
   document.getElementById('btn-step').click();
   const c = document.getElementById('caption').textContent;
-  return /reading those descriptions/i.test(c) && /routes by name/i.test(c);
+  return /by reading (these|those) descriptions/i.test(c) && /routes by name/i.test(c);
+})()`));
+
+
+console.log('\n── Skill loading: the model matches, the harness fetches');
+await load2(1280, 950);
+check('SKILL P2 the catalog is in context from assembly, before any model call', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  const before = document.querySelectorAll('#ctx-stack .ctx-block[data-layer="skillcat"]').length;
+  document.getElementById('btn-step').click();                  // stage 1
+  const blk = document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-layer="skillcat"]');
+  return before === 0 && !!blk &&
+    /Skill catalog/.test(blk.querySelector('.bl').textContent) &&
+    /when_to_use/.test(blk.querySelector('.bd').textContent);
+})()`));
+check('SKILL P2 the catalog is cheap and visually distinct from loaded instructions', await ev(`(() => {
+  const cat = document.querySelector('#ctx-stack .ctx-block[data-layer="skillcat"]');
+  const tok = +cat.querySelector('.bt').textContent.replace(/[^0-9]/g, '');
+  return tok <= 400 && getComputedStyle(cat).borderLeftStyle === 'dashed';
+})()`));
+check('SKILL P2 the catalog survives compaction and the skill release', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let always = true;
+  for (let i = 1; i <= 21; i++) {
+    document.getElementById('btn-step').click();
+    if (!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-layer="skillcat"]')) always = false;
+  }
+  return always;
+})()`));
+check('SKILL P2 no skill INSTRUCTIONS exist before the first model call', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  let clean = true;
+  for (let i = 1; i <= 5; i++) {                                 // stages 1-5, call is stage 4
+    document.getElementById('btn-step').click();
+    if (document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]')) clean = false;
+  }
+  return clean;
+})()`));
+check('SKILL P2 step 5 is the MODEL asking, not the harness querying', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();
+  const lit = [...document.querySelectorAll('#diagram .actor.on')]
+    .map(a => a.getAttribute('data-comp')).sort().join();
+  const label = document.getElementById('stage-label').textContent;
+  const pk = document.getElementById('packet').textContent;
+  return lit === 'harness,model' && /model asks for a skill/i.test(label) && /load skill/i.test(pk);
+})()`));
+check('SKILL P2 the step-5 packet originates at the Model actor', await ev(`(async () => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 4; i++) document.getElementById('btn-step').click();
+  const pk = document.getElementById('packet');
+  document.getElementById('btn-step').click();                   // stage 5
+  const start = pk.getBoundingClientRect();
+  const model = document.getElementById('actor-model').getBoundingClientRect();
+  const skills = document.getElementById('actor-skills').getBoundingClientRect();
+  // it sets off from the Model, not from the Skills library
+  return Math.abs(start.top - model.top) < Math.abs(start.top - skills.top);
+})()`));
+check('SKILL P2 step 6 is the harness fetching, and only then do instructions appear', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 5; i++) document.getElementById('btn-step').click();
+  const before = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  document.getElementById('btn-step').click();                   // stage 6
+  const after = document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length;
+  const lit = [...document.querySelectorAll('#diagram .actor.on')]
+    .map(a => a.getAttribute('data-comp')).sort().join();
+  return before === 0 && after === 1 && lit === 'harness,skills';
+})()`));
+check('SKILL P2 the captions state the timing claim explicitly', await ev(`(() => {
+  const cap = n => { document.getElementById('btn-reset').click();
+    for (let i = 0; i < n; i++) document.getElementById('btn-step').click();
+    return document.getElementById('caption').textContent; };
+  const c5 = cap(5), c6 = cap(6);
+  return /the .{0,3}model.{0,3} read/i.test(c5) && /nothing could have matched earlier/i.test(c5)
+      && /first call it had/i.test(c5)
+      && /only because the model asked for them on a call/i.test(c6);
+})()`));
+check('SKILL P2 release drops the instructions but keeps the catalog', await ev(`(() => {
+  document.getElementById('btn-reset').click();
+  for (let i = 0; i < 20; i++) document.getElementById('btn-step').click();   // stage 20
+  const c = document.getElementById('caption').textContent;
+  return document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length === 0
+      && document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skillcat"]').length === 1
+      && /catalog stays/i.test(c);
+})()`));
+check('SKILL P2 the prose names who matches and when', await ev(`(() => {
+  const tier = [...document.querySelectorAll('.tier')]
+    .find(t => /Skill instructions/.test(t.textContent)).textContent;
+  const annot = document.getElementById('skills').textContent;
+  return /the model.s judgement, not a lookup the harness performs/i.test(tier)
+      && /never load before the first model call|can never load before the first model call/i.test(tier)
+      && /the model makes it/i.test(annot) && /during a call/i.test(annot);
 })()`));
 
 console.log('\n── Page 2: round-3 content and correctness fixes');
@@ -2241,7 +2332,7 @@ check('BACK P2 back from stage N lands at N-1 with the panel in sync', await ev(
   const at6 = [live(), tok()];
   document.getElementById('btn-back').click();                               // -> stage 5
   const at5 = [live(), tok()];
-  return at6[0] === 7 && at5[0] === 6
+  return at6[0] === 8 && at5[0] === 7
       && at6[1] - at5[1] === 800                       // the skill block's tokens
       && document.querySelectorAll('#ctx-stack .ctx-block:not(.leaving)[data-layer="skill"]').length === 0
       && document.getElementById('progress-text').textContent === 'Step 5 of 20';
@@ -2268,9 +2359,9 @@ check('BACK P2 stepping back across compaction restores the pre-compaction panel
   const fourBack = ['read1','edit1','test1','fix1'].every(id =>
     !!document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="' + id + '"]'));
   const summaryGone = !document.querySelector('#ctx-stack .ctx-block:not(.leaving)[data-id="summary"]');
-  return before.n === 13 && before.t === 7928
-      && compacted.n === 10 && compacted.t === 5948
-      && restored.n === 13 && restored.t === 7928
+  return before.n === 14 && before.t === 8228
+      && compacted.n === 11 && compacted.t === 6248
+      && restored.n === 14 && restored.t === 8228
       && fourBack && summaryGone;
 })()`));
 check('BACK P2 backward takes the instant path (no packet flight queued)', await ev(`(() => {

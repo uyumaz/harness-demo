@@ -231,6 +231,8 @@
   .ctx-block .bt{font-size:.67rem;color:var(--muted);float:right;font-variant-numeric:tabular-nums;padding-left:8px}
   .ctx-block[data-layer="identity"]{--c:var(--c-identity)}
   .ctx-block[data-layer="tooldefs"]{--c:var(--c-tools)}
+  /* Dashed rail: the catalog is metadata about skills, not a loaded skill. */
+  .ctx-block[data-layer="skillcat"]{--c:var(--c-skill);border-left-style:dashed}
   .ctx-block[data-layer="project"]{--c:var(--c-semantic)}
   .ctx-block[data-layer="skill"]{--c:var(--c-skill)}
   .ctx-block[data-layer="memory"]{--c:var(--c-memory)}
@@ -506,8 +508,8 @@
         <div class="t-body">Conventions, architecture, domain vocabulary — true of this system regardless of task. Loaded at the start and kept, because nearly every step needs it.</div>
       </div>
       <div class="tier" data-layer="skill">
-        <div class="t-head"><span class="t-name">Skill instructions</span><span class="t-rule">loaded on match</span></div>
-        <div class="t-body">Read in only when a task matches the skill's declared trigger, and dropped when that work is finished. This is just-in-time loading, and it is what lets a library of hundreds of procedures cost nothing until one is needed.</div>
+        <div class="t-head"><span class="t-name">Skill instructions</span><span class="t-rule">loaded on request</span></div>
+        <div class="t-body">Two things, on two different rules. Every skill's <em>description</em> is always resident — a name and a trigger line each, cheap enough to carry the whole library. The <em>instructions</em> are not: they load only after the model, reading those descriptions during a call, asks for one by name. So a skill can never load before the first model call, and the matching is the model's judgement, not a lookup the harness performs. Instructions are dropped when the work is done; the descriptions stay.</div>
       </div>
       <div class="tier" data-layer="memory">
         <div class="t-head"><span class="t-name">Recalled memory</span><span class="t-rule">retrieved by relevance</span></div>
@@ -563,7 +565,7 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
 4. Run the full test suite. If it fails, diagnose before editing again.
 5. Never deploy without an explicit approval step.
 6. Smoke-check the health endpoint after deploying.</code></pre>
-    <p class="annot"><strong>The metadata is the load decision.</strong> <code>when_to_use</code> is matched against the incoming task; <code>allowed_tools</code> narrows what this procedure may reach for even if the agent has more tools available. Only if the match succeeds are the instructions read into the context window &mdash; the file's body costs nothing until then.</p>
+    <p class="annot"><strong>The metadata is the load decision, and the model makes it.</strong> The <code>name</code> and <code>when_to_use</code> lines are in the context from the start &mdash; that is the whole catalog, and it is what the model reads, during a call, to decide this skill applies. It then asks for it by name and the harness fetches the body. <code>allowed_tools</code> narrows what the procedure may reach for even if the agent has more tools available. The file's body costs nothing until that request is made, which is why it cannot be loaded before the first call.</p>
     <p class="annot"><strong>The instructions are ordinary prose.</strong> They are not code and they are not enforced: step 5 is a strong instruction to the model, not a guarantee. The guarantee lives in the permission policy, which stops the deployment whether or not the skill remembered to mention it. That distinction &mdash; instruction versus enforcement &mdash; is the one to hold on to.</p>
   </div>
 </section>
@@ -618,11 +620,12 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
   var BLOCKS = {
     identity:{layer:"identity", label:"Agent identity",       detail:"role, hard rules, refusals",              tokens:900},
     tooldefs:{layer:"tooldefs", label:"Tool definitions",     detail:"names, descriptions, argument schemas",    tokens:1800},
+    skillcat:{layer:"skillcat", label:"Skill catalog",        detail:"descriptions only — name + when_to_use",    tokens:300},
     task:    {layer:"work",     label:"User task",            detail:"“upgrade the payments SDK to v3”", tokens:18},
     proj:    {layer:"project",  label:"Project knowledge",    detail:"repo conventions, architecture notes",    tokens:1500},
     mem:     {layer:"memory",   label:"Recalled memory",      detail:"last upgrade broke the webhook signer",   tokens:140},
     plan:    {layer:"work",     label:"Plan",                 detail:"6 steps, drafted by the model",           tokens:120},
-    skill:   {layer:"skill",    label:"Skill: dependency-upgrade", detail:"5 instructions + allowed tools",     tokens:800},
+    skill:   {layer:"skill",    label:"Skill — instructions",  detail:"dependency-upgrade: 5 steps + allowed tools", tokens:800},
     read1:   {layer:"work",     label:"Tool result: survey",  detail:"23 call sites across 9 files",            tokens:900},
     edit1:   {layer:"work",     label:"Tool result: edits",   detail:"9 files changed",                         tokens:400},
     test1:   {layer:"work",     label:"Tool result: tests FAILED", detail:"1 failing — webhook signature", tokens:700},
@@ -644,8 +647,8 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
     {label:"Ready", comps:[], add:[], drop:[],
      caption:"Press <strong>Play</strong> to watch the whole task run, or <strong>Step</strong> to move through it at your own pace."},
 
-    {label:"Step 1 · The command", comps:["harness","identity","tools"], move:{from:"identity",to:"harness",text:"identity"}, add:["identity","tooldefs","task"],
-     caption:"You type one instruction and walk away. The harness starts a run and assembles the always-resident part of the context: the agent’s <strong>identity</strong> — role, hard rules, refusals — and the <strong>tool definitions</strong> read from its registry, every function it is willing to execute with a name, a description and an argument schema. The model will choose tools by reading those descriptions; the harness routes by name. Both blocks are re-sent on every iteration of the run."},
+    {label:"Step 1 · The command", comps:["harness","identity","tools","skills"], move:{from:"identity",to:"harness",text:"identity"}, add:["identity","tooldefs","skillcat","task"],
+     caption:"You type one instruction and walk away. The harness starts a run and assembles the always-resident part of the context: the agent’s <strong>identity</strong> — role, hard rules, refusals — the <strong>tool definitions</strong> read from its registry, and the <strong>skill catalog</strong> — just the name and <code>when_to_use</code> line of every skill in the library, a few hundred tokens for the lot. The model chooses tools and skills alike by reading these descriptions; the harness routes by name. All of it is re-sent on every iteration."},
 
     {label:"Step 2 · Consulting project knowledge", comps:["semantic","harness"], move:{from:"semantic",to:"harness",text:"project docs"}, add:["proj"],
      caption:"Before planning anything, the agent loads durable <strong>project knowledge</strong>: repository conventions and architecture notes, true of this codebase whatever the task. Loaded once, kept for the whole run."},
@@ -656,11 +659,11 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
     {label:"Step 4 · The plan", comps:["model","harness"], move:{from:"harness",to:"model",text:"context"}, add:["plan"],
      caption:"First model call. With identity, project knowledge and memory in context, the model drafts a six-step plan. Nothing has been executed yet — a plan is just more text."},
 
-    {label:"Step 5 · Skill match", comps:["skills","harness"], move:{from:"harness",to:"skills",text:"match?"}, add:[],
-     caption:"The harness checks its skill library against the task. Each skill declares when it applies; <code>dependency-upgrade</code> says “task mentions upgrading, bumping or migrating a dependency”. That matches — but nothing has been loaded yet."},
+    {label:"Step 5 · The model asks for a skill", comps:["model","harness"], move:{from:"model",to:"harness",text:"load skill"}, add:[],
+     caption:"The plan came back with a request attached. The catalog has been in context since step 1, so on that call the <strong>model</strong> read the <code>when_to_use</code> lines and picked one: <code>dependency-upgrade</code>. Note the timing — nothing could have matched earlier, because matching is something the model does while reading, and step 4 was the first call it had."},
 
-    {label:"Step 6 · Skill loaded", comps:["skills","harness"], move:{from:"skills",to:"harness",text:"skill loaded"}, add:["skill"],
-     caption:"<strong>Now</strong> the skill’s instructions are read into context — just-in-time. Every other skill in the library stays on disk costing nothing. Watch the panel: a new violet block, and the budget moves."},
+    {label:"Step 6 · The harness loads it", comps:["skills","harness"], move:{from:"skills",to:"harness",text:"instructions"}, add:["skill"],
+     caption:"The harness looks that name up in its skill library and appends the full instructions — five steps and an allowed-tools list. This is just-in-time loading: the descriptions were always present and nearly free; the <em>instructions</em> arrive only because the model asked for them on a call. Every other skill stays on disk."},
 
     {label:"Step 7 · Survey before changing", comps:["tools","harness"], move:{from:"harness",to:"tools",text:"survey"}, add:["read1"],
      caption:"The skill’s first instruction is to find every call site before editing. The harness runs the search: 23 call sites across 9 files. That result is now the largest thing in the context."},
@@ -702,7 +705,7 @@ allowed_tools: [read_file, edit_file, run_tests, run_shell, deploy]
      caption:"One durable note goes to <strong>memory</strong>: v3 renamed the signing header. The next run recalls it at step 3 and does not repeat the mistake."},
 
     {label:"Step 20 · Release the layers", comps:["harness"], add:[], drop:["skill"],
-     caption:"The task is finished, so the skill’s instructions are dropped from context. Identity stays. Project knowledge stays. Memory persists outside the context entirely. The tiers behaved like a cache: pinned, demand-paged, evictable."},
+     caption:"The task is finished, so the skill’s <em>instructions</em> are dropped. The catalog stays — its descriptions are what the model would read to pick a different skill next time. Identity stays, tool definitions stay, project knowledge stays; memory persists outside the context entirely. The tiers behaved like a cache: pinned, demand-paged, evictable."},
 
     {label:"Done", comps:[], add:[], drop:[],
      caption:"One command. Twenty steps. One mistake corrected without you, and exactly one interruption — the one the policy required. That is what “autonomous, bounded by policy” means. Press <strong>Reset</strong> to run it again."}
